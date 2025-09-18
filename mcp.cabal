@@ -69,7 +69,6 @@ extra-source-files:
     examples/README.md
     examples/http-server.hs
     examples/claude-desktop-config.json
-    examples/full-config-example.json
 
 homepage:       https://github.com/Tritlo/mcp
 
