@@ -2,6 +2,36 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Issue Tracking with bd (beads)
+
+**IMPORTANT**: This project uses **bd (beads)** for ALL issue tracking. Do NOT use markdown TODOs, task lists, or other tracking methods.
+
+### Quick Reference
+
+```bash
+bd ready --json                    # Check for unblocked work
+bd create "Title" -t bug|feature|task -p 0-4 --json
+bd update <id> --status in_progress --json
+bd close <id> --reason "Done" --json
+```
+
+### Workflow
+
+1. **Check ready work**: `bd ready --json`
+2. **Claim task**: `bd update <id> --status in_progress`
+3. **Work on it**: Implement, test, document
+4. **Discover new work?** `bd create "Found bug" -p 1 --deps discovered-from:<parent-id> --json`
+5. **Complete**: `bd close <id> --reason "Done"`
+6. **Commit together**: Always commit `.beads/issues.jsonl` with code changes
+
+### Priorities
+
+- `0` - Critical (security, data loss, broken builds)
+- `1` - High (major features, important bugs)
+- `2` - Medium (default)
+- `3` - Low (polish, optimization)
+- `4` - Backlog (future ideas)
+
 ## Build Commands
 
 This is a Haskell project using Cabal as its build system.
