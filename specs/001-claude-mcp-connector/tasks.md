@@ -19,9 +19,9 @@
 
 **Purpose**: Prepare codebase for new functionality
 
-- [ ] T001 Review existing MCP.Server.Auth module exports in src/MCP/Server/Auth.hs
-- [ ] T002 Review existing MCP.Server.HTTP module structure in src/MCP/Server/HTTP.hs
-- [ ] T003 [P] Review existing servant-auth integration pattern in src/MCP/Server/HTTP.hs
+- [X] T001 Review existing MCP.Server.Auth module exports in src/MCP/Server/Auth.hs
+- [X] T002 Review existing MCP.Server.HTTP module structure in src/MCP/Server/HTTP.hs
+- [X] T003 [P] Review existing servant-auth integration pattern in src/MCP/Server/HTTP.hs
 
 ---
 
@@ -33,23 +33,23 @@
 
 ### ProtectedResourceMetadata Type
 
-- [ ] T004 Add ProtectedResourceMetadata data type to src/MCP/Server/Auth.hs per data-model.md
-- [ ] T005 Add ToJSON instance for ProtectedResourceMetadata with RFC9728 field names in src/MCP/Server/Auth.hs
-- [ ] T006 Add FromJSON instance for ProtectedResourceMetadata in src/MCP/Server/Auth.hs
-- [ ] T007 Export ProtectedResourceMetadata from MCP.Server.Auth module in src/MCP/Server/Auth.hs
+- [X] T004 Add ProtectedResourceMetadata data type to src/MCP/Server/Auth.hs per data-model.md
+- [X] T005 Add ToJSON instance for ProtectedResourceMetadata with RFC9728 field names in src/MCP/Server/Auth.hs
+- [X] T006 Add FromJSON instance for ProtectedResourceMetadata in src/MCP/Server/Auth.hs
+- [X] T007 Export ProtectedResourceMetadata from MCP.Server.Auth module in src/MCP/Server/Auth.hs
 
 ### ProtectedResourceAuth Combinator (Framework-level 401 handling)
 
-- [ ] T008 Add ProtectedResourceAuth data type (type-level tag for auth scheme) to src/MCP/Server/Auth.hs
-- [ ] T009 Add ProtectedResourceAuthConfig data type with resourceMetadataUrl field to src/MCP/Server/Auth.hs
-- [ ] T010 Add AuthServerData type family instance for ProtectedResourceAuth in src/MCP/Server/Auth.hs
-- [ ] T011 Add ThrowAll instance that returns 401 with WWW-Authenticate header in src/MCP/Server/Auth.hs
-- [ ] T012 Export ProtectedResourceAuth and ProtectedResourceAuthConfig from MCP.Server.Auth module in src/MCP/Server/Auth.hs
+- [X] T008 Add ProtectedResourceAuth data type (type-level tag for auth scheme) to src/MCP/Server/Auth.hs
+- [X] T009 Add ProtectedResourceAuthConfig data type with resourceMetadataUrl field to src/MCP/Server/Auth.hs
+- [X] T010 Add AuthServerData type family instance for ProtectedResourceAuth in src/MCP/Server/Auth.hs
+- [X] T011 Add ThrowAll instance that returns 401 with WWW-Authenticate header in src/MCP/Server/Auth.hs
+- [X] T012 Export ProtectedResourceAuth and ProtectedResourceAuthConfig from MCP.Server.Auth module in src/MCP/Server/Auth.hs
 
 ### HTTPServerConfig Updates
 
-- [ ] T013 Add httpProtectedResourceMetadata field to HTTPServerConfig in src/MCP/Server/HTTP.hs
-- [ ] T014 Add defaultProtectedResourceMetadata helper to generate metadata from httpBaseUrl in src/MCP/Server/HTTP.hs
+- [X] T013 Add httpProtectedResourceMetadata field to HTTPServerConfig in src/MCP/Server/HTTP.hs
+- [X] T014 Add defaultProtectedResourceMetadata helper to generate metadata from httpBaseUrl in src/MCP/Server/HTTP.hs
 
 **Checkpoint**: Foundation ready - ProtectedResourceAuth combinator handles 401s automatically with WWW-Authenticate header
 
@@ -66,12 +66,12 @@
 
 ### Implementation for User Story 1
 
-- [ ] T015 [US1] Add ProtectedResourceAPI type for /.well-known/oauth-protected-resource endpoint in src/MCP/Server/HTTP.hs
-- [ ] T016 [US1] Update OAuthAPI type to include ProtectedResourceAPI in src/MCP/Server/HTTP.hs
-- [ ] T017 [US1] Implement handleProtectedResourceMetadata handler in src/MCP/Server/HTTP.hs
-- [ ] T018 [US1] Wire handleProtectedResourceMetadata into oauthServer in src/MCP/Server/HTTP.hs
-- [ ] T019 [US1] Update MCPAPI type to use ProtectedResourceAuth combinator for protected endpoints in src/MCP/Server/HTTP.hs
-- [ ] T020 [US1] Add ProtectedResourceAuthConfig to server context in runServerHTTP in src/MCP/Server/HTTP.hs
+- [X] T015 [US1] Add ProtectedResourceAPI type for /.well-known/oauth-protected-resource endpoint in src/MCP/Server/HTTP.hs
+- [X] T016 [US1] Update OAuthAPI type to include ProtectedResourceAPI in src/MCP/Server/HTTP.hs
+- [X] T017 [US1] Implement handleProtectedResourceMetadata handler in src/MCP/Server/HTTP.hs
+- [X] T018 [US1] Wire handleProtectedResourceMetadata into oauthServer in src/MCP/Server/HTTP.hs
+- [X] T019 [US1] Update MCPAPI type to use ProtectedResourceAuth combinator for protected endpoints in src/MCP/Server/HTTP.hs
+- [X] T020 [US1] Add ProtectedResourceAuthConfig to server context in runServerHTTP in src/MCP/Server/HTTP.hs
 
 **Checkpoint**: Protected Resource Metadata endpoint works, 401s include WWW-Authenticate header (via combinator)
 
@@ -87,9 +87,9 @@
 
 ### Implementation for User Story 2
 
-- [ ] T021 [US2] Verify /register endpoint returns correct RFC7591 response format in src/MCP/Server/HTTP.hs
-- [ ] T022 [US2] Verify ClientRegistrationResponse includes all required fields in src/MCP/Server/HTTP.hs
-- [ ] T023 [US2] Document DCR endpoint in examples/http-server.hs startup output
+- [X] T021 [US2] Verify /register endpoint returns correct RFC7591 response format in src/MCP/Server/HTTP.hs
+- [X] T022 [US2] Verify ClientRegistrationResponse includes all required fields in src/MCP/Server/HTTP.hs
+- [X] T023 [US2] Document DCR endpoint in examples/http-server.hs startup output
 
 **Checkpoint**: DCR confirmed working per RFC7591
 
@@ -103,11 +103,11 @@
 
 ### Implementation for User Story 3
 
-- [ ] T024 [US3] Add resource parameter to authorize endpoint signature in OAuthAPI type in src/MCP/Server/HTTP.hs
-- [ ] T025 [US3] Update handleAuthorize function signature to accept Maybe Text for resource in src/MCP/Server/HTTP.hs
-- [ ] T026 [US3] Log resource parameter value in handleAuthorize for debugging in src/MCP/Server/HTTP.hs
-- [ ] T027 [US3] Accept resource parameter in token request (already form-encoded) in src/MCP/Server/HTTP.hs
-- [ ] T028 [US3] Log resource parameter from token request for debugging in src/MCP/Server/HTTP.hs
+- [X] T024 [US3] Add resource parameter to authorize endpoint signature in OAuthAPI type in src/MCP/Server/HTTP.hs
+- [X] T025 [US3] Update handleAuthorize function signature to accept Maybe Text for resource in src/MCP/Server/HTTP.hs
+- [X] T026 [US3] Log resource parameter value in handleAuthorize for debugging in src/MCP/Server/HTTP.hs
+- [X] T027 [US3] Accept resource parameter in token request (already form-encoded) in src/MCP/Server/HTTP.hs
+- [X] T028 [US3] Log resource parameter from token request for debugging in src/MCP/Server/HTTP.hs
 
 **Checkpoint**: OAuth flow accepts resource parameter per RFC8707
 
@@ -123,8 +123,8 @@
 
 ### Implementation for User Story 4
 
-- [ ] T029 [US4] Verify handleRefreshTokenGrant returns correct TokenResponse in src/MCP/Server/HTTP.hs
-- [ ] T030 [US4] Verify refresh_token rotation works correctly in src/MCP/Server/HTTP.hs
+- [X] T029 [US4] Verify handleRefreshTokenGrant returns correct TokenResponse in src/MCP/Server/HTTP.hs
+- [X] T030 [US4] Verify refresh_token rotation works correctly in src/MCP/Server/HTTP.hs
 
 **Checkpoint**: Token refresh confirmed working
 
@@ -136,10 +136,10 @@
 
 ### Implementation
 
-- [ ] T031 Add --base-url CLI option to Options parser in examples/http-server.hs
-- [ ] T032 Update HTTPServerConfig construction to use provided base URL in examples/http-server.hs
-- [ ] T033 Update startup output to show Protected Resource Metadata endpoint URL in examples/http-server.hs
-- [ ] T034 Update OAuth demo instructions in startup output in examples/http-server.hs
+- [X] T031 Add --base-url CLI option to Options parser in examples/http-server.hs
+- [X] T032 Update HTTPServerConfig construction to use provided base URL in examples/http-server.hs
+- [X] T033 Update startup output to show Protected Resource Metadata endpoint URL in examples/http-server.hs
+- [X] T034 Update OAuth demo instructions in startup output in examples/http-server.hs
 
 **Checkpoint**: mcp-http example accepts --base-url and shows correct OAuth discovery URLs
 
@@ -149,14 +149,14 @@
 
 **Purpose**: Documentation, testing, and final validation
 
-- [ ] T035 [P] Update CLAUDE.md with ProtectedResourceAuth combinator and Protected Resource Metadata documentation
-- [ ] T036 [P] Update examples/oauth-client-demo.sh to test protected resource metadata endpoint
-- [ ] T037 Run cabal build and fix any compilation errors
-- [ ] T038 Run cabal test and verify existing tests pass
-- [ ] T039 Manual test: verify /.well-known/oauth-protected-resource returns valid JSON
-- [ ] T040 Manual test: verify POST /mcp without auth returns 401 with WWW-Authenticate header
-- [ ] T041 Manual test: complete full OAuth flow using curl commands from quickstart.md
-- [ ] T042 Validate implementation against specs/001-claude-mcp-connector/quickstart.md
+- [X] T035 [P] Update CLAUDE.md with ProtectedResourceAuth combinator and Protected Resource Metadata documentation
+- [X] T036 [P] Update examples/oauth-client-demo.sh to test protected resource metadata endpoint
+- [X] T037 Run cabal build and fix any compilation errors
+- [X] T038 Run cabal test and verify existing tests pass
+- [X] T039 Manual test: verify /.well-known/oauth-protected-resource returns valid JSON
+- [X] T040 Manual test: verify POST /mcp without auth returns 401 with WWW-Authenticate header
+- [X] T041 Manual test: complete full OAuth flow using curl commands from quickstart.md
+- [X] T042 Validate implementation against specs/001-claude-mcp-connector/quickstart.md
 
 ---
 
