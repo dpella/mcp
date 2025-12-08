@@ -1,5 +1,5 @@
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE LambdaCase #-}
@@ -788,10 +788,11 @@ data CompletionResult = CompletionResult
 
 instance Default CompletionResult where
     def = CompletionResult{values = [], total = Nothing, hasMore = Just True}
-          -- The "hasMore" field defaults to "Just True", indicating
-          -- that there are always more values to fetch. This is not the
-          -- derived default, so we need to provide the Default instance
-          -- for CompletionResult explicitly.
+
+-- The "hasMore" field defaults to "Just True", indicating
+-- that there are always more values to fetch. This is not the
+-- derived default, so we need to provide the Default instance
+-- for CompletionResult explicitly.
 
 $(deriveJSON defaultOptions{omitNothingFields = True} ''CompletionResult)
 

@@ -17,7 +17,6 @@ To test:
 > cat $MESSAGE_FILE | cabal run mcp-stdio -- --log
 5. Send a message to the server using the tool `getCurrentDate`:
 > echo '{"jsonrpc":"2.0","id":1,"method":"callTool","params":{"name":"getCurrentDate"}}' | cabal run mcp-stdio -- --log
-
 -}
 module Main where
 
@@ -111,10 +110,9 @@ instance MCPServer MCPServerM where
                 let content = TextContentType textContent
                 return $ CallToolResult{content = [content], structuredContent = Nothing, isError = Just True, _meta = Nothing}
 
-    -- handleComplete inherits the default implementation
+-- handleComplete inherits the default implementation
 
-    -- handleSetLevel inherits the default implementation
-
+-- handleSetLevel inherits the default implementation
 
 main :: IO ()
 main = do

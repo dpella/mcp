@@ -100,7 +100,7 @@ library
     -- other-extensions:
 
     -- Other library packages from which modules are imported.
-    build-depends:    
+    build-depends:
         base >= 4.18.2.1 && <= 4.21.0.0,
         aeson >= 2.1 && < 2.3,
         text >= 2.0 && <= 2.1.2,
@@ -117,6 +117,8 @@ library
         servant-server >= 0.19 && < 0.21,
         servant >= 0.19 && < 0.21,
         http-types >= 0.12 && < 0.13,
+        http-media >= 0.8 && < 0.9,
+        http-api-data >= 0.6 && < 0.7,
         servant-auth >= 0.4 && < 0.5,
         servant-auth-server >= 0.4 && < 0.5,
         jose >= 0.10 && < 0.12,
@@ -255,4 +257,5 @@ test-suite mcp-test
     -- Test dependencies.
     build-depends:
         base >= 4.18.2.1 && <= 4.21.0.0,
-        mcp
+        mcp,
+        text >= 2.0 && <= 2.1.2

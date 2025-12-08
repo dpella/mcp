@@ -21,8 +21,8 @@
 
 **Purpose**: Project initialization - no code changes, preparation only
 
-- [ ] T001 Review existing OAuth flow in `src/MCP/Server/HTTP.hs` and identify modification points
-- [ ] T002 [P] Review existing `OAuthConfig` in `src/MCP/Server/Auth.hs` for extension points
+- [X] T001 Review existing OAuth flow in `src/MCP/Server/HTTP.hs` and identify modification points
+- [X] T002 [P] Review existing `OAuthConfig` in `src/MCP/Server/Auth.hs` for extension points
 
 **Checkpoint**: Codebase understood, ready to implement types
 
@@ -36,34 +36,34 @@
 
 ### Types (Constitution Principle I: Type-Driven Design)
 
-- [ ] T003 Add `HTML` content type with `Accept` and `MimeRender` instances in `src/MCP/Server/HTTP.hs`
-- [ ] T004 [P] Add `CredentialStore` and `HashedPassword` types in `src/MCP/Server/Auth.hs`
-- [ ] T005 [P] Add `PendingAuthorization` data type in `src/MCP/Server/HTTP.hs`
-- [ ] T006 [P] Add `LoginForm` data type with `FromForm` instance in `src/MCP/Server/HTTP.hs`
-- [ ] T007 [P] Add `LoginError` sum type in `src/MCP/Server/HTTP.hs`
-- [ ] T008 [P] Add `LoginResult` data type in `src/MCP/Server/HTTP.hs`
+- [X] T003 Add `HTML` content type with `Accept` and `MimeRender` instances in `src/MCP/Server/HTTP.hs`
+- [X] T004 [P] Add `CredentialStore` and `HashedPassword` types in `src/MCP/Server/Auth.hs`
+- [X] T005 [P] Add `PendingAuthorization` data type in `src/MCP/Server/HTTP.hs`
+- [X] T006 [P] Add `LoginForm` data type with `FromForm` instance in `src/MCP/Server/HTTP.hs`
+- [X] T007 [P] Add `LoginError` sum type in `src/MCP/Server/HTTP.hs`
+- [X] T008 [P] Add `LoginResult` data type in `src/MCP/Server/HTTP.hs`
 
 ### State Extensions
 
-- [ ] T009 Extend `OAuthState` with `pendingAuthorizations :: Map Text PendingAuthorization` in `src/MCP/Server/HTTP.hs`
-- [ ] T010 Extend `OAuthConfig` with `credentialStore` and `loginSessionExpirySeconds` fields in `src/MCP/Server/Auth.hs`
+- [X] T009 Extend `OAuthState` with `pendingAuthorizations :: Map Text PendingAuthorization` in `src/MCP/Server/HTTP.hs`
+- [X] T010 Extend `OAuthConfig` with `credentialStore` and `loginSessionExpirySeconds` fields in `src/MCP/Server/Auth.hs`
 
 ### Pure Functions (Constitution Principle V: Pure Core)
 
-- [ ] T011 Implement `mkHashedPassword` smart constructor using SHA256 in `src/MCP/Server/Auth.hs`
-- [ ] T012 [P] Implement `validateCredential` pure function with constant-time comparison in `src/MCP/Server/Auth.hs`
-- [ ] T013 [P] Implement `defaultDemoCredentialStore` with demo/demo123 and admin/admin456 in `src/MCP/Server/Auth.hs`
+- [X] T011 Implement `mkHashedPassword` smart constructor using SHA256 in `src/MCP/Server/Auth.hs`
+- [X] T012 [P] Implement `validateCredential` pure function with constant-time comparison in `src/MCP/Server/Auth.hs`
+- [X] T013 [P] Implement `defaultDemoCredentialStore` with demo/demo123 and admin/admin456 in `src/MCP/Server/Auth.hs`
 
 ### HTML Templates (Pure Rendering)
 
-- [ ] T014 [P] Implement `renderLoginPage` template function in `src/MCP/Server/HTTP.hs`
-- [ ] T015 [P] Implement `renderErrorPage` template function in `src/MCP/Server/HTTP.hs`
+- [X] T014 [P] Implement `renderLoginPage` template function in `src/MCP/Server/HTTP.hs`
+- [X] T015 [P] Implement `renderErrorPage` template function in `src/MCP/Server/HTTP.hs`
 
 ### Tests for Foundational Types
 
-- [ ] T016 [P] Add unit test for `validateCredential` (valid credentials) in `test/Main.hs`
-- [ ] T017 [P] Add unit test for `validateCredential` (invalid credentials) in `test/Main.hs`
-- [ ] T018 [P] Add unit test for `mkHashedPassword` consistency in `test/Main.hs`
+- [X] T016 [P] Add unit test for `validateCredential` (valid credentials) in `test/Main.hs`
+- [X] T017 [P] Add unit test for `validateCredential` (invalid credentials) in `test/Main.hs`
+- [X] T018 [P] Add unit test for `mkHashedPassword` consistency in `test/Main.hs`
 
 **Checkpoint**: All types defined, pure functions tested, ready for endpoint implementation
 
@@ -79,16 +79,16 @@
 
 ### Implementation for User Story 1
 
-- [ ] T019 [US1] Modify `handleAuthorize` to create `PendingAuthorization` and render login page in `src/MCP/Server/HTTP.hs`
-- [ ] T020 [US1] Add `LoginAPI` type definition to Servant API in `src/MCP/Server/HTTP.hs`
-- [ ] T021 [US1] Implement `handleLogin` endpoint for POST /login in `src/MCP/Server/HTTP.hs`
-- [ ] T022 [US1] Wire up session cookie handling (Set-Cookie header) in `src/MCP/Server/HTTP.hs`
-- [ ] T023 [US1] Implement auth code generation on successful login (reuse existing pattern) in `src/MCP/Server/HTTP.hs`
-- [ ] T024 [US1] Implement redirect to client with code and state in `src/MCP/Server/HTTP.hs`
-- [ ] T025 [US1] Handle invalid credentials - re-render login page with error in `src/MCP/Server/HTTP.hs`
-- [ ] T026 [US1] Handle empty form fields - render validation errors in `src/MCP/Server/HTTP.hs`
-- [ ] T027 [US1] Update `defaultDemoOAuthConfig` to include credential store in `src/MCP/Server/HTTP.hs`
-- [ ] T028 [US1] Remove `autoApproveAuth` logic from authorize flow in `src/MCP/Server/HTTP.hs`
+- [X] T019 [US1] Modify `handleAuthorize` to create `PendingAuthorization` and render login page in `src/MCP/Server/HTTP.hs`
+- [X] T020 [US1] Add `LoginAPI` type definition to Servant API in `src/MCP/Server/HTTP.hs`
+- [X] T021 [US1] Implement `handleLogin` endpoint for POST /login in `src/MCP/Server/HTTP.hs`
+- [X] T022 [US1] Wire up session cookie handling (Set-Cookie header) in `src/MCP/Server/HTTP.hs`
+- [X] T023 [US1] Implement auth code generation on successful login (reuse existing pattern) in `src/MCP/Server/HTTP.hs`
+- [X] T024 [US1] Implement redirect to client with code and state in `src/MCP/Server/HTTP.hs`
+- [X] T025 [US1] Handle invalid credentials - re-render login page with error in `src/MCP/Server/HTTP.hs`
+- [X] T026 [US1] Handle empty form fields - render validation errors in `src/MCP/Server/HTTP.hs`
+- [X] T027 [US1] Update `defaultDemoOAuthConfig` to include credential store in `src/MCP/Server/HTTP.hs`
+- [X] T028 [US1] Remove `autoApproveAuth` logic from authorize flow in `src/MCP/Server/HTTP.hs`
 
 **Checkpoint**: User Story 1 complete - full login flow works with demo credentials
 
@@ -104,10 +104,10 @@
 
 ### Implementation for User Story 2
 
-- [ ] T029 [US2] Extend `renderLoginPage` to accept and display client name in `src/MCP/Server/HTTP.hs`
-- [ ] T030 [US2] Look up client name from `registeredClients` in `handleAuthorize` in `src/MCP/Server/HTTP.hs`
-- [ ] T031 [US2] Extend `renderLoginPage` to display human-readable scope descriptions in `src/MCP/Server/HTTP.hs`
-- [ ] T032 [US2] Add scope-to-description mapping function in `src/MCP/Server/HTTP.hs`
+- [X] T029 [US2] Extend `renderLoginPage` to accept and display client name in `src/MCP/Server/HTTP.hs`
+- [X] T030 [US2] Look up client name from `registeredClients` in `handleAuthorize` in `src/MCP/Server/HTTP.hs`
+- [X] T031 [US2] Extend `renderLoginPage` to display human-readable scope descriptions in `src/MCP/Server/HTTP.hs`
+- [X] T032 [US2] Add scope-to-description mapping function in `src/MCP/Server/HTTP.hs`
 
 **Checkpoint**: User Story 2 complete - login page shows context information
 
@@ -123,10 +123,10 @@
 
 ### Implementation for User Story 3
 
-- [ ] T033 [US3] Handle `action=deny` in `handleLogin` endpoint in `src/MCP/Server/HTTP.hs`
-- [ ] T034 [US3] Generate OAuth `access_denied` error response in `src/MCP/Server/HTTP.hs`
-- [ ] T035 [US3] Redirect with error and preserved state parameter in `src/MCP/Server/HTTP.hs`
-- [ ] T036 [US3] Clean up `PendingAuthorization` on deny in `src/MCP/Server/HTTP.hs`
+- [X] T033 [US3] Handle `action=deny` in `handleLogin` endpoint in `src/MCP/Server/HTTP.hs`
+- [X] T034 [US3] Generate OAuth `access_denied` error response in `src/MCP/Server/HTTP.hs`
+- [X] T035 [US3] Redirect with error and preserved state parameter in `src/MCP/Server/HTTP.hs`
+- [X] T036 [US3] Clean up `PendingAuthorization` on deny in `src/MCP/Server/HTTP.hs`
 
 **Checkpoint**: User Story 3 complete - deny flow works correctly
 
@@ -138,11 +138,11 @@
 
 **Spec Reference**: [spec.md - Edge Cases](./spec.md#edge-cases)
 
-- [ ] T037 Handle invalid/missing OAuth parameters - render error page in `src/MCP/Server/HTTP.hs`
-- [ ] T038 [P] Handle expired sessions - check `pendingCreatedAt` vs `loginSessionExpirySeconds` in `src/MCP/Server/HTTP.hs`
-- [ ] T039 [P] Handle cookies disabled - detect missing session cookie, render error in `src/MCP/Server/HTTP.hs`
-- [ ] T040 Handle unregistered client_id - render appropriate error in `src/MCP/Server/HTTP.hs`
-- [ ] T041 Handle invalid redirect_uri - render error (don't redirect) in `src/MCP/Server/HTTP.hs`
+- [X] T037 Handle invalid/missing OAuth parameters - render error page in `src/MCP/Server/HTTP.hs`
+- [X] T038 [P] Handle expired sessions - check `pendingCreatedAt` vs `loginSessionExpirySeconds` in `src/MCP/Server/HTTP.hs`
+- [X] T039 [P] Handle cookies disabled - detect missing session cookie, render error in `src/MCP/Server/HTTP.hs`
+- [X] T040 Handle unregistered client_id - render appropriate error in `src/MCP/Server/HTTP.hs`
+- [X] T041 Handle invalid redirect_uri - render error (don't redirect) in `src/MCP/Server/HTTP.hs`
 
 **Checkpoint**: All edge cases handled gracefully
 
@@ -152,11 +152,11 @@
 
 **Purpose**: Final cleanup and validation
 
-- [ ] T042 [P] Update `examples/http-server.hs` to log demo credentials on startup
-- [ ] T043 Verify `cabal build` succeeds without warnings
-- [ ] T044 Run `cabal test` and ensure all tests pass
-- [ ] T045 [P] Run manual test using `examples/oauth-client-demo.sh` (update if needed)
-- [ ] T046 Update CLAUDE.md if any new patterns introduced
+- [X] T042 [P] Update `examples/http-server.hs` to log demo credentials on startup
+- [X] T043 Verify `cabal build` succeeds without warnings
+- [X] T044 Run `cabal test` and ensure all tests pass
+- [X] T045 [P] Run manual test using `examples/oauth-client-demo.sh` (update if needed)
+- [X] T046 Update CLAUDE.md if any new patterns introduced
 
 **Checkpoint**: Feature complete, tested, documented
 

@@ -1,5 +1,5 @@
 ---
-description: Execute the implementation plan by processing and executing all tasks defined in tasks.md
+: Execute the implementation plan by processing and executing all tasks defined in tasks.md
 ---
 # Coordinator Agent Protocol
 
@@ -19,7 +19,7 @@ You are a PURE ORCHESTRATOR - like a project manager who:
 
 You CAN ONLY:
 - Read subagent reports
-- Update MANIFEST.md
+- Update markdown files under the spec directory
 - Make decisions based on reports
 - Launch new subagents with questions
 - Track progress
@@ -35,59 +35,21 @@ EVERY implementation → Delegate to implementer
 - **NEVER understand implementations** - delegate questions to analyzer subagents
 - **NEVER search codebase** - delegate search tasks to analyzer subagents
 - **NEVER debug or test code** - delegate to test/debug subagents
-- **FORBIDDEN: Read/Grep/Glob on source code** - ONLY use on WORK_DIR files (MANIFEST, reports, handoffs)
-- **CAN create/update MANIFEST.md ONLY** - Single source of truth for context and progress
-- **CAN read WORK_DIR files ONLY** - MANIFEST, reports, handoffs for coordination context
+- **FORBIDDEN: Read/Grep/Glob on source code** - ONLY use on spec, plans, tasks, etc. files
+- **CAN create/update spec/plan/tasks/etc files ONLY** - Single source of truth for context and progress
+- **CAN read coordination files ONLY** spec/plan/tasks/handoffs/etc for coordination context
 - **CAN run git status/log** - For state checking only
 - **MUST write handoff documents directly** - Never delegate handoff creation
-
-## COORDINATOR DECISION PROCESS
-
-```
-PROCEDURE make_decision(need_info_about)
-    // FORBIDDEN: Trying to figure it out yourself
-    // REQUIRED: Ask subagent, wait for answer
-
-    question ← formulate_specific_question(need_info_about)
-
-    analyzer_prompt ← "
-        @{WORK_DIR}/MANIFEST.md
-        QUESTION: {question}
-        PROVIDE: Curated response with only essential info
-    "
-
-    response ← delegate_to_analyzer(analyzer_prompt)
-    decision ← make_decision_from_report(response)
-
-    capture_thought(
-        "Decision based on analyzer report: {decision}",
-        stage ← "Decision Making",
-        score ← 1.0
-    )
-
-    RETURN decision
-END PROCEDURE
-
-// Examples:
-// Need: "Where does terrain loading happen?"
-// Action: Delegate "Find all terrain loading code locations" to analyzer
-//
-// Need: "How to integrate compute_block_extent()?"
-// Action: Delegate "Identify integration points for compute_block_extent()" to analyzer
-//
-// Need: "What GDAL calls need replacing?"
-// Action: Delegate "List all direct GDAL calls that need trait replacement" to analyzer
-```
 
 ## DELEGATION-ONLY PROTOCOL
 
 ```
 PROCEDURE coordinator_main_loop
     // FORBIDDEN: Writing code, analyzing files, running tests, debugging, understanding implementation, Read/Grep/Glob on source code
-    // ALLOWED: Creating/updating MANIFEST.md, reading WORK_DIR files only, launching subagents, git status/log ONLY
+    // ALLOWED: Creating/updating/reading coordination files only, launching subagents, git status/log ONLY
 
     IF about_to_use_Read_OR_Grep_OR_Glob_on_source_code THEN
-        ABORT("FORBIDDEN: Read/Grep/Glob on source code - ONLY use on WORK_DIR (MANIFEST/reports/handoffs). Delegate to analyzer.")
+        ABORT("FORBIDDEN: Read/Grep/Glob on source code - ONLY use on spec dir. Delegate to analyzer.")
     END IF
 
     IF attempting_to_write_application_code THEN

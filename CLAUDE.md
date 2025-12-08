@@ -158,9 +158,47 @@ When implementing OAuth features or modifying the authentication flow:
 **For demo/testing**, use `defaultDemoOAuthConfig` and override specific fields.
 **For production**, configure all parameters according to your security requirements.
 
-### Testing OAuth Flow:
+### Interactive Login Flow (002-login-auth-page):
+
+The OAuth authorization endpoint now implements an interactive login page instead of auto-approval:
+
+**Key Implementation Patterns**:
+1. **Session Management**: Uses session cookies (`mcp_session`) to track pending authorizations
+   - `PendingAuthorization` type stores OAuth parameters during login
+   - Session IDs are UUIDs tracked in `OAuthState.pendingAuthorizations`
+   - Configurable expiry via `loginSessionExpirySeconds` (default: 10 minutes)
+
+2. **Credential Storage**: New `CredentialStore` type with `HashedPassword` (SHA256)
+   - Use `mkHashedPassword` smart constructor for password hashing
+   - `validateCredential` performs constant-time comparison
+   - `defaultDemoCredentialStore` provides demo/demo123 and admin/admin456
+
+3. **HTML Content Type**: Custom `HTML` content type for Servant
+   - `Accept` instance for `text/html`
+   - `MimeRender` instance to serve HTML responses
+   - Used for login page, error pages, and redirects
+
+4. **Form Handling**: `LoginForm` type with `FromForm` instance
+   - Includes hidden `session_id` field to link form submission to pending auth
+   - Validates username/password on submission
+   - Handles both "approve" and "deny" actions
+
+5. **Error Handling**: Comprehensive edge case coverage
+   - Invalid OAuth parameters → error page (don't redirect untrusted URIs)
+   - Expired sessions → detect via timestamp comparison
+   - Cookies disabled → check for missing/mismatched session cookie
+   - Unregistered client → error page with client_id
+   - Invalid redirect_uri → error page (security: never redirect to unvalidated URIs)
+
+6. **Security Patterns**:
+   - Never redirect to untrusted redirect_uri (validate against registered clients)
+   - Constant-time password comparison to prevent timing attacks
+   - Session cookies with HttpOnly semantics
+   - PKCE code_challenge stored in PendingAuthorization for later validation
+
+**Testing with Interactive Login**:
 ```bash
-# Start server with OAuth
+# Start server with OAuth (displays demo credentials on startup)
 cabal run mcp-http -- --oauth
 
 # Test metadata discovery
@@ -170,8 +208,15 @@ curl http://localhost:8080/.well-known/oauth-protected-resource
 # Test 401 with WWW-Authenticate header
 curl -i http://localhost:8080/mcp
 
-# Run full OAuth demo
-./examples/oauth-client-demo.sh
+# Interactive login flow (requires browser or headless automation)
+# 1. Open /authorize in browser
+# 2. Enter credentials: demo/demo123 or admin/admin456
+# 3. Click "Approve" or "Deny"
+# 4. Redirect contains authorization code (approve) or error (deny)
+
+# Note: ./examples/oauth-client-demo.sh is INCOMPATIBLE with interactive login
+# The script expects auto-approval mode (autoApproveAuth=true)
+# To use with script, would need headless browser automation (puppeteer, selenium)
 ```
 
 ## Active Technologies
@@ -181,4 +226,10 @@ curl -i http://localhost:8080/mcp
 - In-memory (TVar-based state management, consistent with existing OAuth state storage) (002-login-auth-page)
 
 ## Recent Changes
+- 002-login-auth-page: Implemented interactive login page with credential authentication
+  - Replaced auto-approval OAuth flow with secure login form
+  - Added session cookie management and credential validation
+  - Implemented comprehensive edge case handling (expired sessions, cookies disabled, invalid parameters)
+  - Created reusable HTML rendering patterns for Servant
+  - Security: constant-time password comparison, SHA256 hashing, redirect URI validation
 - 001-claude-mcp-connector: Added Haskell GHC2021 (GHC 9.4+) + servant-server 0.19-0.20, servant-auth-server 0.4, warp 3.3, jose 0.10-0.11, aeson 2.1-2.2

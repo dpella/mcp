@@ -40,6 +40,13 @@ module MCP.Server.Auth (
     ProtectedResourceMetadata (..),
     ProtectedResourceAuth,
     ProtectedResourceAuthConfig (..),
+
+    -- * Credential Management
+    CredentialStore (..),
+    HashedPassword (..),
+    mkHashedPassword,
+    validateCredential,
+    defaultDemoCredentialStore,
 ) where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
@@ -49,8 +56,11 @@ import Data.Aeson (FromJSON, ToJSON)
 import Data.Aeson qualified as Aeson
 import Data.ByteArray (convert)
 import Data.ByteString (ByteString)
+import Data.ByteString qualified as BS
 import Data.ByteString.Base64.URL qualified as B64URL
 import Data.ByteString.Lazy qualified as LBS
+import Data.Map.Strict (Map)
+import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
@@ -108,6 +118,20 @@ data OAuthConfig = OAuthConfig
     , clientIdPrefix :: Text
     , -- Response templates
       authorizationSuccessTemplate :: Maybe Text
+    , -- Credential management
+      credentialStore :: CredentialStore
+    , loginSessionExpirySeconds :: Int
+    }
+    deriving (Show, Generic)
+
+-- | Hashed password wrapper
+newtype HashedPassword = HashedPassword {unHashedPassword :: Text}
+    deriving (Show, Eq)
+
+-- | In-memory credential store
+data CredentialStore = CredentialStore
+    { storeCredentials :: Map Text HashedPassword -- username -> hashed password
+    , storeSalt :: Text -- Server-wide salt for hashing
     }
     deriving (Show, Generic)
 
@@ -138,23 +162,29 @@ data OAuthMetadata = OAuthMetadata
 -- | Protected Resource Metadata (RFC 9728)
 data ProtectedResourceMetadata = ProtectedResourceMetadata
     { resource :: Text
-    -- ^ The protected resource's identifier (MCP server URL)
-    -- Required. MUST be an absolute URI with https scheme.
+    {- ^ The protected resource's identifier (MCP server URL)
+    Required. MUST be an absolute URI with https scheme.
+    -}
     , authorizationServers :: [Text]
-    -- ^ List of authorization server issuer identifiers
-    -- Required for MCP. At least one entry.
+    {- ^ List of authorization server issuer identifiers
+    Required for MCP. At least one entry.
+    -}
     , scopesSupported :: Maybe [Text]
-    -- ^ Scope values the resource server understands
-    -- Optional. e.g., ["mcp:read", "mcp:write"]
+    {- ^ Scope values the resource server understands
+    Optional. e.g., ["mcp:read", "mcp:write"]
+    -}
     , bearerMethodsSupported :: Maybe [Text]
-    -- ^ Token presentation methods supported
-    -- Optional. Default: ["header"] per RFC9728
+    {- ^ Token presentation methods supported
+    Optional. Default: ["header"] per RFC9728
+    -}
     , resourceName :: Maybe Text
-    -- ^ Human-readable name for end-user display
-    -- Optional. e.g., "My MCP Server"
+    {- ^ Human-readable name for end-user display
+    Optional. e.g., "My MCP Server"
+    -}
     , resourceDocumentation :: Maybe Text
-    -- ^ URL of developer documentation
-    -- Optional.
+    {- ^ URL of developer documentation
+    Optional.
+    -}
     }
     deriving (Show, Generic)
 
@@ -359,9 +389,55 @@ discoverOAuthMetadata issuerUrl = liftIO $ do
 data ProtectedResourceAuth
 
 -- | Configuration for ProtectedResourceAuth
-data ProtectedResourceAuthConfig = ProtectedResourceAuthConfig
+newtype ProtectedResourceAuthConfig = ProtectedResourceAuthConfig
     { resourceMetadataUrl :: Text
-    -- ^ URL to the protected resource metadata endpoint
-    -- e.g., "https://mcp.example.com/.well-known/oauth-protected-resource"
+    {- ^ URL to the protected resource metadata endpoint
+    e.g., "https://mcp.example.com/.well-known/oauth-protected-resource"
+    -}
     }
     deriving (Show, Generic)
+
+-- | Create a hashed password from plaintext using SHA256
+mkHashedPassword :: Text -> Text -> HashedPassword
+mkHashedPassword salt password =
+    let saltedPassword = salt <> password
+        passwordBytes = TE.encodeUtf8 saltedPassword
+        hashBytes = hashWith SHA256 passwordBytes
+        hashByteString = convert hashBytes :: ByteString
+     in HashedPassword $ TE.decodeUtf8 $ B64URL.encodeUnpadded hashByteString
+
+-- | Validate a credential against the store using constant-time comparison
+validateCredential :: CredentialStore -> Text -> Text -> Bool
+validateCredential store username password =
+    case Map.lookup username (storeCredentials store) of
+        Nothing -> False
+        Just storedHash ->
+            let candidateHash = mkHashedPassword (storeSalt store) password
+             in constantTimeCompare (unHashedPassword storedHash) (unHashedPassword candidateHash)
+
+-- | Constant-time string comparison to prevent timing attacks
+constantTimeCompare :: Text -> Text -> Bool
+constantTimeCompare a b =
+    let bytesA = TE.encodeUtf8 a
+        bytesB = TE.encodeUtf8 b
+     in constantTimeCompareBytes bytesA bytesB
+  where
+    constantTimeCompareBytes :: ByteString -> ByteString -> Bool
+    constantTimeCompareBytes xs ys
+        | BS.length xs /= BS.length ys = False
+        | otherwise =
+            let differences = zipWith (/=) (BS.unpack xs) (BS.unpack ys)
+             in not (or differences)
+
+-- | Default demo credential store with test accounts
+defaultDemoCredentialStore :: CredentialStore
+defaultDemoCredentialStore =
+    let salt = "mcp-demo-salt"
+     in CredentialStore
+            { storeCredentials =
+                Map.fromList
+                    [ ("demo", mkHashedPassword salt "demo123")
+                    , ("admin", mkHashedPassword salt "admin456")
+                    ]
+            , storeSalt = salt
+            }

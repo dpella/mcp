@@ -228,6 +228,10 @@ main = do
     if optEnableOAuth
         then do
             putStrLn ""
+            putStrLn "Demo Credentials:"
+            putStrLn "  Username: demo    Password: demo123"
+            putStrLn "  Username: admin   Password: admin456"
+            putStrLn ""
             putStrLn "OAuth Demo Flow (Discovery endpoints available at /.well-known/*):"
             putStrLn "1. Generate PKCE code verifier and challenge"
             putStrLn "2. Open authorization URL in browser:"

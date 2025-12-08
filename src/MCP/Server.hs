@@ -99,6 +99,7 @@ class (Monad m) => MCPServer m where
 
     -- | Default, trivial implementations for all handlers
     handleListResources _ = return def
+
     handleReadResource _ = return def
     handleListResourceTemplates _ = return def
     handleListPrompts _ = return def

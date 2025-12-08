@@ -27,6 +27,21 @@ module MCP.Server.HTTP (
     -- * Demo Configuration Helpers
     defaultDemoOAuthConfig,
     defaultProtectedResourceMetadata,
+
+    -- * HTML Content Type
+    HTML,
+
+    -- * Login Types
+    PendingAuthorization (..),
+    LoginForm (..),
+    LoginError (..),
+    LoginResult (..),
+
+    -- * HTML Rendering
+    renderLoginPage,
+    renderErrorPage,
+    scopeToDescription,
+    formatScopeDescriptions,
 ) where
 
 import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO, readTVarIO, writeTVar)
@@ -39,6 +54,7 @@ import Data.Aeson qualified as Aeson
 import Data.ByteString.Lazy qualified as LBS
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
@@ -46,19 +62,30 @@ import Data.Time.Clock (UTCTime, addUTCTime, getCurrentTime)
 import Data.UUID qualified as UUID
 import Data.UUID.V4 qualified as UUID
 import GHC.Generics (Generic)
+import Network.HTTP.Media ((//), (/:))
 import Network.Wai (Application)
 import Network.Wai.Handler.Warp (Port, run)
 import Network.Wai.Middleware.RequestLogger (logStdoutDev)
 import Servant (Context (..), Handler, Proxy (..), Server, serve, serveWithContext, throwError)
-import Servant.API (FormUrlEncoded, Get, JSON, PlainText, Post, QueryParam, QueryParam', ReqBody, Required, (:<|>) (..), (:>))
+import Servant.API (Accept (..), FormUrlEncoded, Get, Header, Headers, JSON, MimeRender (..), NoContent (..), PlainText, Post, QueryParam, QueryParam', ReqBody, Required, addHeader, (:<|>) (..), (:>))
 import Servant.Auth.Server (Auth, AuthResult (..), FromJWT, JWT, JWTSettings, ToJWT, defaultCookieSettings, defaultJWTSettings, generateKey, makeJWT)
 import Servant.Server (err400, err401, err500, errBody, errHeaders)
+import Web.FormUrlEncoded (FromForm (..), parseUnique)
 
 import Control.Monad (unless, when)
 import MCP.Protocol
 import MCP.Server (MCPServer (..), MCPServerM, ServerConfig (..), ServerState (..), initialServerState, runMCPServer)
-import MCP.Server.Auth (OAuthConfig (..), OAuthMetadata (..), OAuthProvider (..), ProtectedResourceMetadata (..), validateCodeVerifier)
+import MCP.Server.Auth (CredentialStore (..), OAuthConfig (..), OAuthMetadata (..), OAuthProvider (..), ProtectedResourceMetadata (..), defaultDemoCredentialStore, validateCodeVerifier, validateCredential)
 import MCP.Types
+
+-- | HTML content type for Servant
+data HTML
+
+instance Accept HTML where
+    contentType _ = "text" // "html" /: ("charset", "utf-8")
+
+instance MimeRender HTML Text where
+    mimeRender _ = LBS.fromStrict . TE.encodeUtf8
 
 -- | Configuration for running an MCP HTTP server
 data HTTPServerConfig = HTTPServerConfig
@@ -71,8 +98,9 @@ data HTTPServerConfig = HTTPServerConfig
     , httpJWK :: Maybe JWK -- JWT signing key
     , httpProtocolVersion :: Text -- MCP protocol version
     , httpProtectedResourceMetadata :: Maybe ProtectedResourceMetadata
-    -- ^ Custom protected resource metadata.
-    -- When Nothing, auto-generated from httpBaseUrl.
+    {- ^ Custom protected resource metadata.
+    When Nothing, auto-generated from httpBaseUrl.
+    -}
     }
     deriving (Show)
 
@@ -103,8 +131,65 @@ data OAuthState = OAuthState
     , accessTokens :: Map Text AuthUser -- token -> user
     , refreshTokens :: Map Text (Text, AuthUser) -- refresh_token -> (access_token, user)
     , registeredClients :: Map Text ClientInfo -- client_id -> ClientInfo
+    , pendingAuthorizations :: Map Text PendingAuthorization -- session_id -> pending authorization
     }
     deriving (Show, Generic)
+
+-- | Pending authorization awaiting user authentication
+data PendingAuthorization = PendingAuthorization
+    { pendingClientId :: Text
+    , pendingRedirectUri :: Text
+    , pendingCodeChallenge :: Text
+    , pendingCodeChallengeMethod :: Text
+    , pendingScope :: Maybe Text
+    , pendingState :: Maybe Text
+    , pendingResource :: Maybe Text
+    , pendingCreatedAt :: UTCTime
+    }
+    deriving (Show, Generic)
+
+-- | Login form data
+data LoginForm = LoginForm
+    { formUsername :: Text
+    , formPassword :: Text
+    , formSessionId :: Text
+    , formAction :: Text
+    }
+    deriving (Show, Generic)
+
+instance FromForm LoginForm where
+    fromForm form =
+        LoginForm
+            <$> parseUnique "username" form
+            <*> parseUnique "password" form
+            <*> parseUnique "session_id" form
+            <*> parseUnique "action" form
+
+-- | Login error types
+data LoginError
+    = InvalidOAuthParameters Text
+    | ClientNotRegistered Text
+    | InvalidRedirectUri Text
+    | SessionNotFound Text
+    | SessionExpired
+    | AuthenticationFailed
+    | CookiesRequired
+    | MissingFormFields [Text]
+    deriving (Show, Eq)
+
+-- | Login result
+data LoginResult
+    = LoginSuccess
+        { resultAuthCode :: Text
+        , resultRedirectUri :: Text
+        , resultState :: Maybe Text
+        }
+    | LoginDenied
+        { resultRedirectUri :: Text
+        , resultState :: Maybe Text
+        }
+    | LoginFailure LoginError
+    deriving (Show)
 
 -- | Client registration request
 data ClientRegistrationRequest = ClientRegistrationRequest
@@ -192,6 +277,13 @@ type UnprotectedMCPAPI = "mcp" :> ReqBody '[JSON] Aeson.Value :> Post '[JSON] Ae
 -- | Protected Resource Metadata API (RFC 9728)
 type ProtectedResourceAPI = ".well-known" :> "oauth-protected-resource" :> Get '[JSON] ProtectedResourceMetadata
 
+-- | Login API endpoints
+type LoginAPI =
+    "login"
+        :> Header "Cookie" Text
+        :> ReqBody '[FormUrlEncoded] LoginForm
+        :> Post '[HTML] (Headers '[Header "Location" Text, Header "Set-Cookie" Text] NoContent)
+
 -- | OAuth endpoints
 type OAuthAPI =
     ProtectedResourceAPI
@@ -208,7 +300,8 @@ type OAuthAPI =
             :> QueryParam "scope" Text
             :> QueryParam "state" Text
             :> QueryParam "resource" Text
-            :> Get '[PlainText] Text
+            :> Get '[HTML] (Headers '[Header "Set-Cookie" Text] Text)
+        :<|> LoginAPI
         :<|> "token"
             :> ReqBody '[FormUrlEncoded] [(Text, Text)]
             :> Post '[JSON] TokenResponse
@@ -240,16 +333,19 @@ mcpApp config stateVar oauthStateVar jwtSettings =
             :<|> handleMetadata cfg
             :<|> handleRegister cfg oauthState
             :<|> handleAuthorize cfg oauthState
+            :<|> handleLogin cfg oauthState jwtSettings
             :<|> handleToken jwtSettings cfg oauthState
 
     mcpServerAuth :: HTTPServerConfig -> TVar ServerState -> AuthResult AuthUser -> Aeson.Value -> Handler Aeson.Value
     mcpServerAuth httpConfig stateTVar authResult requestValue =
         case authResult of
             Authenticated user -> handleHTTPRequest httpConfig stateTVar (Just user) requestValue
-            _ -> throwError $ err401
-                { errHeaders = [("WWW-Authenticate", wwwAuthenticateValue)]
-                , errBody = encode $ object ["error" .= ("Authentication required" :: Text)]
-                }
+            _ ->
+                throwError $
+                    err401
+                        { errHeaders = [("WWW-Authenticate", wwwAuthenticateValue)]
+                        , errBody = encode $ object ["error" .= ("Authentication required" :: Text)]
+                        }
       where
         metadataUrl = httpBaseUrl httpConfig <> "/.well-known/oauth-protected-resource"
         wwwAuthenticateValue = TE.encodeUtf8 $ "Bearer resource_metadata=\"" <> metadataUrl <> "\""
@@ -579,64 +675,167 @@ handleRegister config oauthStateVar (ClientRegistrationRequest reqName reqRedire
             , token_endpoint_auth_method = reqAuth
             }
 
--- | Handle OAuth authorize endpoint
-handleAuthorize :: HTTPServerConfig -> TVar OAuthState -> Text -> Text -> Text -> Text -> Text -> Maybe Text -> Maybe Text -> Maybe Text -> Handler Text
+-- | Handle OAuth authorize endpoint - now returns login page HTML
+handleAuthorize :: HTTPServerConfig -> TVar OAuthState -> Text -> Text -> Text -> Text -> Text -> Maybe Text -> Maybe Text -> Maybe Text -> Handler (Headers '[Header "Set-Cookie" Text] Text)
 handleAuthorize config oauthStateVar responseType clientId redirectUri codeChallenge codeChallengeMethod mScope mState mResource = do
     -- Log resource parameter for RFC8707 support
     liftIO $ putStrLn $ "Resource parameter: " <> maybe "not provided" T.unpack mResource
 
-    -- Validate parameters according to MCP spec
+    -- T037: Validate response_type (return HTML error page instead of JSON)
     when (responseType /= "code") $
-        throwError err400{errBody = encode $ object ["error" .= ("unsupported_response_type" :: Text), "error_description" .= ("Only 'code' response type is supported" :: Text)]}
+        throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Unsupported Response Type" "Only 'code' response type is supported. Please contact the application developer.", errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
 
+    -- T037: Validate code_challenge_method (return HTML error page instead of JSON)
     when (codeChallengeMethod /= "S256") $
-        throwError err400{errBody = encode $ object ["error" .= ("invalid_request" :: Text), "error_description" .= ("Only 'S256' code challenge method is supported" :: Text)]}
+        throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Invalid Request" "Only 'S256' code challenge method is supported. Please contact the application developer.", errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
 
-    -- Generate authorization code
-    code <- liftIO $ generateAuthCodeWithConfig config
+    -- Look up client to get client name for display
+    oauthState <- liftIO $ readTVarIO oauthStateVar
+
+    -- T040: Handle unregistered client_id - render error page (don't redirect - can't trust redirect_uri)
+    clientInfo <- case Map.lookup clientId (registeredClients oauthState) of
+        Just ci -> return ci
+        Nothing ->
+            throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Unregistered Client" ("Client ID '" <> clientId <> "' is not registered. Please contact the application developer."), errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
+
+    -- T041: Handle invalid redirect_uri - render error page (don't redirect)
+    unless (redirectUri `elem` clientRedirectUris clientInfo) $
+        throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Invalid Redirect URI" ("The redirect URI '" <> redirectUri <> "' is not registered for this client. Please contact the application developer."), errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
+
+    let displayName = clientName clientInfo
+
+    -- Generate session ID
+    sessionId <- liftIO $ UUID.toText <$> UUID.nextRandom
     currentTime <- liftIO getCurrentTime
-    let expirySeconds = maybe 600 (fromIntegral . authCodeExpirySeconds) (httpOAuthConfig config)
-        expiry = addUTCTime expirySeconds currentTime
 
-    -- Generate user ID based on configuration
-    let oauthCfg = httpOAuthConfig config
-        userId = case demoUserIdTemplate =<< oauthCfg of
-            Just template -> T.replace "{clientId}" clientId template
-            Nothing -> "user-" <> clientId -- Fallback if no demo mode
-        authCode =
-            AuthorizationCode
-                { authCode = code
-                , authClientId = clientId
-                , authRedirectUri = redirectUri
-                , authCodeChallenge = codeChallenge
-                , authCodeChallengeMethod = codeChallengeMethod
-                , authScopes = maybe [] (T.splitOn " ") mScope
-                , authUserId = userId
-                , authExpiry = expiry
+    -- Create pending authorization
+    let pending =
+            PendingAuthorization
+                { pendingClientId = clientId
+                , pendingRedirectUri = redirectUri
+                , pendingCodeChallenge = codeChallenge
+                , pendingCodeChallengeMethod = codeChallengeMethod
+                , pendingScope = mScope
+                , pendingState = mState
+                , pendingResource = mResource
+                , pendingCreatedAt = currentTime
                 }
 
-    -- Store authorization code
+    -- Store pending authorization
     liftIO $ atomically $ modifyTVar' oauthStateVar $ \s ->
-        s{authCodes = Map.insert code authCode (authCodes s)}
+        s{pendingAuthorizations = Map.insert sessionId pending (pendingAuthorizations s)}
 
-    -- Return the callback URL with auth code
-    let stateParam = maybe "" ("&state=" <>) mState
-        defaultTemplate =
-            "Authorization successful!\n\n"
-                <> "Redirect to: "
-                <> redirectUri
-                <> "?code="
-                <> code
-                <> stateParam
-                <> "\n\n"
-                <> "Use this authorization code to exchange for an access token."
-        template =
-            maybe
-                defaultTemplate
-                ( T.replace "{redirectUri}" redirectUri . T.replace "{code}" code . T.replace "{state}" stateParam
-                )
-                (authorizationSuccessTemplate =<< httpOAuthConfig config)
-    return template
+    -- Build session cookie
+    let sessionExpirySeconds = maybe 600 loginSessionExpirySeconds (httpOAuthConfig config)
+        cookieValue = "mcp_session=" <> sessionId <> "; HttpOnly; SameSite=Strict; Path=/; Max-Age=" <> T.pack (show sessionExpirySeconds)
+        scopes = fromMaybe "default access" mScope
+        loginHtml = renderLoginPage displayName scopes mResource sessionId
+
+    return $ addHeader cookieValue loginHtml
+
+-- | Extract session ID from cookie header
+extractSessionFromCookie :: Text -> Maybe Text
+extractSessionFromCookie cookieHeader =
+    let cookies = T.splitOn ";" cookieHeader
+        sessionCookies = filter (T.isInfixOf "mcp_session=") cookies
+     in case sessionCookies of
+            (cookie : _) ->
+                let parts = T.splitOn "=" cookie
+                 in case parts of
+                        [_, value] -> Just (T.strip value)
+                        _ -> Nothing
+            [] -> Nothing
+
+-- | Handle login form submission
+handleLogin :: HTTPServerConfig -> TVar OAuthState -> JWTSettings -> Maybe Text -> LoginForm -> Handler (Headers '[Header "Location" Text, Header "Set-Cookie" Text] NoContent)
+handleLogin config oauthStateVar _jwtSettings mCookie loginForm = do
+    -- Extract session ID from form
+    let sessionId = formSessionId loginForm
+
+    -- T039: Handle cookies disabled - check if cookie matches form session_id
+    case mCookie of
+        Nothing ->
+            throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Cookies Required" "Your browser must have cookies enabled to sign in. Please enable cookies and try again.", errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
+        Just cookie ->
+            -- Parse session cookie and verify it matches form session_id
+            let cookieSessionId = extractSessionFromCookie cookie
+             in unless (cookieSessionId == Just sessionId) $
+                    throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Cookies Required" "Session cookie mismatch. Please enable cookies and try again.", errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
+
+    -- Look up pending authorization
+    oauthState <- liftIO $ readTVarIO oauthStateVar
+    pending <- case Map.lookup sessionId (pendingAuthorizations oauthState) of
+        Just p -> return p
+        Nothing ->
+            throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Invalid Session" "Session not found or has expired. Please restart the authorization flow.", errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
+
+    -- T038: Handle expired sessions
+    currentTime <- liftIO getCurrentTime
+    let sessionExpirySeconds = maybe 600 (fromIntegral . loginSessionExpirySeconds) (httpOAuthConfig config)
+        expiryTime = addUTCTime sessionExpirySeconds (pendingCreatedAt pending)
+    when (currentTime > expiryTime) $
+        throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Session Expired" "Your login session has expired. Please restart the authorization flow.", errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
+
+    -- Check if user denied access
+    if formAction loginForm == "deny"
+        then do
+            -- Clear session and redirect with error
+            let clearCookie = "mcp_session=; Max-Age=0; Path=/"
+                errorParams = "error=access_denied&error_description=User%20denied%20access"
+                stateParam = case pendingState pending of
+                    Just s -> "&state=" <> s
+                    Nothing -> ""
+                redirectUrl = pendingRedirectUri pending <> "?" <> errorParams <> stateParam
+
+            -- Remove pending authorization
+            liftIO $ atomically $ modifyTVar' oauthStateVar $ \s ->
+                s{pendingAuthorizations = Map.delete sessionId (pendingAuthorizations s)}
+
+            return $ addHeader redirectUrl $ addHeader clearCookie NoContent
+        else do
+            -- Validate credentials
+            let oauthCfg = httpOAuthConfig config
+                store = maybe (CredentialStore Map.empty "") credentialStore oauthCfg
+                username = formUsername loginForm
+                password = formPassword loginForm
+
+            if validateCredential store username password
+                then do
+                    -- Generate authorization code
+                    code <- liftIO $ generateAuthCodeWithConfig config
+                    currentTime <- liftIO getCurrentTime
+                    let expirySeconds = maybe 600 (fromIntegral . authCodeExpirySeconds) oauthCfg
+                        expiry = addUTCTime expirySeconds currentTime
+                        authCode =
+                            AuthorizationCode
+                                { authCode = code
+                                , authClientId = pendingClientId pending
+                                , authRedirectUri = pendingRedirectUri pending
+                                , authCodeChallenge = pendingCodeChallenge pending
+                                , authCodeChallengeMethod = pendingCodeChallengeMethod pending
+                                , authScopes = maybe [] (T.splitOn " ") (pendingScope pending)
+                                , authUserId = username
+                                , authExpiry = expiry
+                                }
+
+                    -- Store authorization code and remove pending authorization
+                    liftIO $ atomically $ modifyTVar' oauthStateVar $ \s ->
+                        s
+                            { authCodes = Map.insert code authCode (authCodes s)
+                            , pendingAuthorizations = Map.delete sessionId (pendingAuthorizations s)
+                            }
+
+                    -- Build redirect URL with code
+                    let stateParam = case pendingState pending of
+                            Just s -> "&state=" <> s
+                            Nothing -> ""
+                        redirectUrl = pendingRedirectUri pending <> "?code=" <> code <> stateParam
+                        clearCookie = "mcp_session=; Max-Age=0; Path=/"
+
+                    return $ addHeader redirectUrl $ addHeader clearCookie NoContent
+                else
+                    -- Invalid credentials - return error
+                    throwError err401{errBody = encode $ object ["error" .= ("authentication_failed" :: Text), "error_description" .= ("Invalid username or password" :: Text)]}
 
 -- | Handle OAuth token endpoint
 handleToken :: JWTSettings -> HTTPServerConfig -> TVar OAuthState -> [(Text, Text)] -> Handler TokenResponse
@@ -791,9 +990,9 @@ defaultDemoOAuthConfig =
         , supportedGrantTypes = ["authorization_code", "refresh_token"]
         , supportedAuthMethods = ["none"]
         , supportedCodeChallengeMethods = ["S256"]
-        , -- Demo mode settings
-          autoApproveAuth = True
-        , demoUserIdTemplate = Just "test-user-{clientId}"
+        , -- Demo mode settings (no longer auto-approve, now requires login)
+          autoApproveAuth = False
+        , demoUserIdTemplate = Nothing
         , demoEmailDomain = "example.com"
         , demoUserName = "Test User"
         , publicClientSecret = Just ""
@@ -803,6 +1002,9 @@ defaultDemoOAuthConfig =
         , clientIdPrefix = "client_"
         , -- Default response template
           authorizationSuccessTemplate = Nothing
+        , -- Credential management
+          credentialStore = defaultDemoCredentialStore
+        , loginSessionExpirySeconds = 600 -- 10 minutes
         }
 
 -- | Default protected resource metadata for a given base URL
@@ -816,6 +1018,92 @@ defaultProtectedResourceMetadata baseUrl =
         , resourceName = Nothing
         , resourceDocumentation = Nothing
         }
+
+-- | Map scope to human-readable description
+scopeToDescription :: Text -> Text
+scopeToDescription "mcp:read" = "Read MCP resources"
+scopeToDescription "mcp:write" = "Write MCP resources"
+scopeToDescription "mcp:tools" = "Execute MCP tools"
+scopeToDescription other = other -- fallback to raw scope
+
+-- | Format scopes as human-readable descriptions
+formatScopeDescriptions :: Text -> Text
+formatScopeDescriptions scopes =
+    let scopeList = T.splitOn " " scopes
+        descriptions = map scopeToDescription scopeList
+     in T.intercalate ", " descriptions
+
+-- | Render login page HTML
+renderLoginPage :: Text -> Text -> Maybe Text -> Text -> Text
+renderLoginPage clientName scopes mResource sessionId =
+    T.unlines
+        [ "<!DOCTYPE html>"
+        , "<html>"
+        , "<head>"
+        , "  <meta charset=\"utf-8\">"
+        , "  <title>Sign In - MCP Server</title>"
+        , "  <style>"
+        , "    body { font-family: system-ui, sans-serif; max-width: 500px; margin: 50px auto; padding: 20px; }"
+        , "    h1 { color: #333; }"
+        , "    form { margin-top: 20px; }"
+        , "    label { display: block; margin: 15px 0 5px; }"
+        , "    input[type=text], input[type=password] { width: 100%; padding: 8px; box-sizing: border-box; }"
+        , "    button { margin-top: 20px; margin-right: 10px; padding: 10px 20px; }"
+        , "    .info { background: #f0f0f0; padding: 15px; border-radius: 5px; margin: 20px 0; }"
+        , "  </style>"
+        , "</head>"
+        , "<body>"
+        , "  <h1>Sign In</h1>"
+        , "  <div class=\"info\">"
+        , "    <p>Application <strong>" <> escapeHtml clientName <> "</strong> is requesting access.</p>"
+        , "    <p>Permissions requested: " <> escapeHtml (formatScopeDescriptions scopes) <> "</p>"
+        , case mResource of
+            Just res -> "    <p>Resource: " <> escapeHtml res <> "</p>"
+            Nothing -> ""
+        , "  </div>"
+        , "  <form method=\"POST\" action=\"/login\">"
+        , "    <input type=\"hidden\" name=\"session_id\" value=\"" <> escapeHtml sessionId <> "\">"
+        , "    <label>Username:"
+        , "      <input type=\"text\" name=\"username\" required autofocus>"
+        , "    </label>"
+        , "    <label>Password:"
+        , "      <input type=\"password\" name=\"password\" required>"
+        , "    </label>"
+        , "    <button type=\"submit\" name=\"action\" value=\"login\">Sign In</button>"
+        , "    <button type=\"submit\" name=\"action\" value=\"deny\">Deny</button>"
+        , "  </form>"
+        , "</body>"
+        , "</html>"
+        ]
+
+-- | Render error page HTML
+renderErrorPage :: Text -> Text -> Text
+renderErrorPage errorTitle errorMessage =
+    T.unlines
+        [ "<!DOCTYPE html>"
+        , "<html>"
+        , "<head>"
+        , "  <meta charset=\"utf-8\">"
+        , "  <title>Error - MCP Server</title>"
+        , "  <style>"
+        , "    body { font-family: system-ui, sans-serif; max-width: 500px; margin: 50px auto; padding: 20px; }"
+        , "    h1 { color: #d32f2f; }"
+        , "    .error { background: #ffebee; padding: 15px; border-radius: 5px; border-left: 4px solid #d32f2f; }"
+        , "  </style>"
+        , "</head>"
+        , "<body>"
+        , "  <h1>" <> escapeHtml errorTitle <> "</h1>"
+        , "  <div class=\"error\">"
+        , "    <p>" <> escapeHtml errorMessage <> "</p>"
+        , "  </div>"
+        , "  <p>Please contact the application developer.</p>"
+        , "</body>"
+        , "</html>"
+        ]
+
+-- | Escape HTML special characters
+escapeHtml :: Text -> Text
+escapeHtml = T.replace "&" "&amp;" . T.replace "<" "&lt;" . T.replace ">" "&gt;" . T.replace "\"" "&quot;" . T.replace "'" "&#39;"
 
 -- | Run the MCP server as an HTTP server
 runServerHTTP :: (MCPServer MCPServerM) => HTTPServerConfig -> IO ()
@@ -836,6 +1124,7 @@ runServerHTTP config = do
                 , accessTokens = Map.empty
                 , refreshTokens = Map.empty
                 , registeredClients = Map.empty
+                , pendingAuthorizations = Map.empty
                 }
 
     putStrLn $ "Starting MCP HTTP Server on port " ++ show (httpPort config) ++ "..."
