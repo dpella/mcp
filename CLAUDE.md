@@ -91,6 +91,7 @@ The implementation supports two transport methods:
 - RESTful HTTP API with multiple endpoints:
   - `/mcp` - Main MCP endpoint for JSON-RPC requests
   - `/.well-known/oauth-authorization-server` - OAuth metadata discovery
+  - `/.well-known/oauth-protected-resource` - Protected resource metadata
   - `/register` - Dynamic client registration
   - `/authorize` - OAuth authorization with PKCE
   - `/token` - Token exchange endpoint
@@ -109,6 +110,8 @@ The implementation supports two transport methods:
   - 1-hour access token validity
   - Public client support (no client secret)
   - Redirect URI validation
+  - Protected resource metadata (RFC 8414 Section 3)
+  - WWW-Authenticate headers on 401 responses with bearer token realm
 - Configurable OAuth providers (Google, GitHub, custom)
 - JWT support via servant-auth-server
 
@@ -162,6 +165,10 @@ cabal run mcp-http -- --oauth
 
 # Test metadata discovery
 curl http://localhost:8080/.well-known/oauth-authorization-server
+curl http://localhost:8080/.well-known/oauth-protected-resource
+
+# Test 401 with WWW-Authenticate header
+curl -i http://localhost:8080/mcp
 
 # Run full OAuth demo
 ./examples/oauth-client-demo.sh
