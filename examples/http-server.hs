@@ -25,6 +25,7 @@ module Main where
 
 import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
+import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Data.Time (defaultTimeLocale, formatTime, getCurrentTime)
 import Options.Applicative
@@ -40,6 +41,7 @@ data Options = Options
     { optPort :: Int
     , optEnableLogging :: Bool
     , optEnableOAuth :: Bool
+    , optBaseUrl :: Maybe String
     }
     deriving (Show)
 
@@ -64,6 +66,13 @@ optionsParser =
             ( long "oauth"
                 <> short 'o'
                 <> help "Enable OAuth authentication (demo mode)"
+            )
+        <*> optional
+            ( strOption
+                ( long "base-url"
+                    <> metavar "URL"
+                    <> help "Base URL for OAuth endpoints (default: http://localhost:PORT)"
+                )
             )
 
 -- | Full parser with help
@@ -165,7 +174,7 @@ main = do
                 , experimental = Nothing
                 }
 
-    let baseUrl = T.pack $ "http://localhost:" ++ show optPort
+    let baseUrl = T.pack $ fromMaybe ("http://localhost:" ++ show optPort) optBaseUrl
         oauthConfig =
             if optEnableOAuth
                 then
@@ -214,11 +223,12 @@ main = do
 
     putStrLn $ "HTTP server configured, starting on port " ++ show optPort ++ "..."
     putStrLn $ "MCP endpoint available at: POST " ++ T.unpack baseUrl ++ "/mcp"
+    putStrLn $ "Protected Resource Metadata: GET " ++ T.unpack baseUrl ++ "/.well-known/oauth-protected-resource"
 
     if optEnableOAuth
         then do
             putStrLn ""
-            putStrLn "OAuth Demo Flow:"
+            putStrLn "OAuth Demo Flow (Discovery endpoints available at /.well-known/*):"
             putStrLn "1. Generate PKCE code verifier and challenge"
             putStrLn "2. Open authorization URL in browser:"
             putStrLn $ "   " ++ T.unpack baseUrl ++ "/authorize?response_type=code&client_id=demo-client&redirect_uri=http://localhost:3000/callback&code_challenge=YOUR_CHALLENGE&code_challenge_method=S256&scope=mcp:read%20mcp:write"
