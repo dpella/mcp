@@ -1,0 +1,78 @@
+# MCP 401 Unauthorized Response Contract
+# WWW-Authenticate header format per RFC 9728 Section 5.1
+
+openapi: 3.0.3
+info:
+  title: MCP 401 Response Contract
+  version: 1.0.0
+  description: |
+    Defines the expected 401 response format when accessing /mcp endpoint
+    without valid authentication. Includes WWW-Authenticate header for
+    OAuth discovery.
+
+paths:
+  /mcp:
+    post:
+      operationId: mcpRequest
+      summary: MCP JSON-RPC endpoint
+      description: Main MCP endpoint requiring Bearer authentication
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: JSON-RPC 2.0 request
+      responses:
+        '200':
+          description: Successful MCP response
+          content:
+            application/json:
+              schema:
+                type: object
+                description: JSON-RPC 2.0 response
+        '401':
+          description: Authentication required
+          headers:
+            WWW-Authenticate:
+              description: |
+                Bearer authentication challenge with resource_metadata parameter
+                pointing to the Protected Resource Metadata URL.
+              schema:
+                type: string
+              example: 'Bearer resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource"'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "Authentication required"
+              example:
+                error: "Authentication required"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: OAuth 2.0 Bearer token obtained via authorization code flow
+
+# WWW-Authenticate Header Format:
+#
+# Bearer resource_metadata="<URL>"
+#
+# Where <URL> is the absolute URL to the Protected Resource Metadata endpoint:
+#   https://<host>/.well-known/oauth-protected-resource
+#
+# Example:
+#   WWW-Authenticate: Bearer resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource"
+#
+# The URL MUST:
+# - Use HTTPS scheme
+# - Be an absolute URI
+# - Point to a valid RFC 9728 metadata document

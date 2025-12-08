@@ -1,0 +1,86 @@
+# OAuth 2.0 Protected Resource Metadata API
+# RFC 9728 compliant endpoint for MCP server discovery
+
+openapi: 3.0.3
+info:
+  title: MCP OAuth Protected Resource Metadata
+  version: 1.0.0
+  description: |
+    RFC 9728 Protected Resource Metadata endpoint for MCP server.
+    Enables OAuth clients (like Claude.ai) to discover authorization server.
+
+servers:
+  - url: https://mcp.example.com
+    description: Example MCP server
+
+paths:
+  /.well-known/oauth-protected-resource:
+    get:
+      operationId: getProtectedResourceMetadata
+      summary: Get Protected Resource Metadata
+      description: |
+        Returns metadata about the protected MCP resource including
+        the authorization server location for OAuth discovery.
+      tags:
+        - Discovery
+      responses:
+        '200':
+          description: Protected Resource Metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProtectedResourceMetadata'
+              example:
+                resource: "https://mcp.example.com"
+                authorization_servers:
+                  - "https://mcp.example.com"
+                scopes_supported:
+                  - "mcp:read"
+                  - "mcp:write"
+                bearer_methods_supported:
+                  - "header"
+                resource_name: "Example MCP Server"
+
+components:
+  schemas:
+    ProtectedResourceMetadata:
+      type: object
+      required:
+        - resource
+        - authorization_servers
+      properties:
+        resource:
+          type: string
+          format: uri
+          description: The protected resource's identifier (MCP server URL)
+          example: "https://mcp.example.com"
+        authorization_servers:
+          type: array
+          items:
+            type: string
+            format: uri
+          minItems: 1
+          description: List of authorization server issuer identifiers
+          example: ["https://mcp.example.com"]
+        scopes_supported:
+          type: array
+          items:
+            type: string
+          description: Scope values the resource server understands
+          example: ["mcp:read", "mcp:write"]
+        bearer_methods_supported:
+          type: array
+          items:
+            type: string
+            enum: ["header", "body", "query"]
+          description: Token presentation methods supported
+          example: ["header"]
+        resource_name:
+          type: string
+          description: Human-readable name for end-user display
+          example: "Example MCP Server"
+        resource_documentation:
+          type: string
+          format: uri
+          description: URL of developer documentation
+          example: "https://docs.example.com/mcp"

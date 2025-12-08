@@ -166,3 +166,10 @@ curl http://localhost:8080/.well-known/oauth-authorization-server
 # Run full OAuth demo
 ./examples/oauth-client-demo.sh
 ```
+
+## Active Technologies
+- Haskell GHC2021 (GHC 9.4+) + servant-server 0.19-0.20, servant-auth-server 0.4, warp 3.3, jose 0.10-0.11, aeson 2.1-2.2 (001-claude-mcp-connector)
+- In-memory (TVar-based state for OAuth codes, tokens, clients) (001-claude-mcp-connector)
+
+## Recent Changes
+- 001-claude-mcp-connector: Added Haskell GHC2021 (GHC 9.4+) + servant-server 0.19-0.20, servant-auth-server 0.4, warp 3.3, jose 0.10-0.11, aeson 2.1-2.2
