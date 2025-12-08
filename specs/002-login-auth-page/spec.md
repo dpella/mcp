@@ -11,6 +11,7 @@
 
 - Q: Should the login page require cookies or provide a URL-based fallback for cookie-less browsers? → A: Require cookies; display error message if cookies disabled.
 - Q: Should we maintain backward compatibility with autoApproveAuth toggle? → A: No; remove auto-approve entirely. Login page replaces it. Demo mode = preconfigured demo credentials.
+- Q: Will this implementation complicate future Device Flow support? → A: No; Login Session entity generalized to not assume redirect-based flow parameters.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -90,7 +91,7 @@ A user can choose to deny the authorization request, which redirects them back t
 ### Key Entities
 
 - **User Credentials**: Username and password pair used for authentication. Credentials are validated against a configurable credential store (ships with preconfigured demo credentials for out-of-the-box testing).
-- **Login Session**: Temporary session tracking OAuth authorization parameters (client_id, redirect_uri, code_challenge, scope, state) through the login flow.
+- **Login Session**: Temporary session tracking the pending authorization request through the login flow. For authorization code flow, this includes client_id, redirect_uri, code_challenge, scope, and state.
 
 ## Success Criteria *(mandatory)*
 
