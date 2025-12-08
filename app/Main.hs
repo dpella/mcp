@@ -1,3 +1,4 @@
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedStrings #-}
 -- hlint is wrong; this is needed to permit this module to create
 -- values in types that share field names, such as every type

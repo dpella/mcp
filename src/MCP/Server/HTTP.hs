@@ -67,7 +67,7 @@ import Network.Wai (Application)
 import Network.Wai.Handler.Warp (Port, run)
 import Network.Wai.Middleware.RequestLogger (logStdoutDev)
 import Servant (Context (..), Handler, Proxy (..), Server, serve, serveWithContext, throwError)
-import Servant.API (Accept (..), FormUrlEncoded, Get, Header, Headers, JSON, MimeRender (..), NoContent (..), PlainText, Post, QueryParam, QueryParam', ReqBody, Required, addHeader, (:<|>) (..), (:>))
+import Servant.API (Accept (..), FormUrlEncoded, Get, Header, Headers, JSON, MimeRender (..), NoContent (..), PlainText, Post, QueryParam, QueryParam', ReqBody, Required, StdMethod (POST), Verb, addHeader, (:<|>) (..), (:>))
 import Servant.Auth.Server (Auth, AuthResult (..), FromJWT, JWT, JWTSettings, ToJWT, defaultCookieSettings, defaultJWTSettings, generateKey, makeJWT)
 import Servant.Server (err400, err401, err500, errBody, errHeaders)
 import Web.FormUrlEncoded (FromForm (..), parseUnique)
@@ -277,12 +277,12 @@ type UnprotectedMCPAPI = "mcp" :> ReqBody '[JSON] Aeson.Value :> Post '[JSON] Ae
 -- | Protected Resource Metadata API (RFC 9728)
 type ProtectedResourceAPI = ".well-known" :> "oauth-protected-resource" :> Get '[JSON] ProtectedResourceMetadata
 
--- | Login API endpoints
+-- | Login API endpoints - returns HTTP 302 redirect
 type LoginAPI =
     "login"
         :> Header "Cookie" Text
         :> ReqBody '[FormUrlEncoded] LoginForm
-        :> Post '[HTML] (Headers '[Header "Location" Text, Header "Set-Cookie" Text] NoContent)
+        :> Verb 'POST 302 '[HTML] (Headers '[Header "Location" Text, Header "Set-Cookie" Text] NoContent)
 
 -- | OAuth endpoints
 type OAuthAPI =
