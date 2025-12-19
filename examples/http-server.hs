@@ -3,15 +3,22 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 {- |
-Example HTTP MCP Server
+Module      : Main
+Description : Example HTTP MCP Server
+Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
+License     : MIT
+Maintainer  : mpg@mpg.is, alberto.valverde@pakenergy.com
+Stability   : experimental
+Portability : GHC
 
 This example demonstrates how to run the MCP server over HTTP transport.
 The server will expose the MCP API at POST /mcp
 
 To test:
+
 1. Compile: cabal build mcp-http
 2. Run: cabal run mcp-http
-3. Send JSON-RPC requests to: http://localhost:<port>/mcp
+3. Send JSON-RPC requests to: http://localhost:\<port\>/mcp
 
 Example request:
 curl -X POST http://localhost:8080/mcp \
@@ -24,23 +31,29 @@ cabal run mcp-http -- --oauth --oauth-traces-only  # Filter to show only OAuth e
 -}
 module Main where
 
+import Control.Concurrent.STM (newTVarIO)
 import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Functor.Contravariant (contramap)
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Data.Time (defaultTimeLocale, formatTime, getCurrentTime)
+import Network.Wai.Handler.Warp (run)
 import Options.Applicative
 import Plow.Logging (IOTracer (..), Tracer (..), filterTracer)
 import Plow.Logging.Async (withAsyncHandleTracer)
-import System.IO (stdout)
+import System.IO (hFlush, stdout)
 
 import MCP.Protocol
 import MCP.Server
 import MCP.Server.Auth
 import MCP.Server.HTTP
+import MCP.Server.HTTP.AppEnv (AppEnv (..), runAppM)
 import MCP.Trace.Types (MCPTrace (..), isOAuthTrace, renderMCPTrace)
 import MCP.Types
+import Servant.Auth.Server (defaultJWTSettings, generateKey)
+import Servant.OAuth2.IDP.Auth.Demo (DemoCredentialEnv (..), defaultDemoCredentialStore)
+import Servant.OAuth2.IDP.Store.InMemory (defaultExpiryConfig, newOAuthTVarEnv)
 
 -- | A no-op tracer that discards all trace events
 nullIOTracer :: IOTracer a
@@ -268,6 +281,7 @@ main = do
             putStrLn "  -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}'"
 
     putStrLn ""
+    hFlush stdout
 
     -- Setup async tracing to stdout with 1000-message buffer
     withAsyncHandleTracer stdout 1000 $ \textTracer -> do
@@ -280,4 +294,38 @@ main = do
                          in IOTracer $ filterTracer isOAuthTrace (unIOTracer mcpTracer)
                     else mcpTracer
             httpTracer = contramap MCPHttp filteredTracer
-        runServerHTTP config httpTracer
+
+        if optEnableOAuth
+            then do
+                -- Use mcpApp pattern for OAuth mode (following demoMcpApp implementation)
+                -- Generate JWK for JWT signing
+                jwk <- generateKey
+                let jwtSettings = defaultJWTSettings jwk
+
+                -- Initialize in-memory OAuth state storage
+                oauthEnv <- newOAuthTVarEnv defaultExpiryConfig
+
+                -- Create demo credential environment
+                let authEnv = DemoCredentialEnv defaultDemoCredentialStore
+
+                -- Initialize server state
+                stateVar <- newTVarIO $ initialServerState (httpCapabilities config)
+
+                -- Create AppEnv with configured settings (including stateVar)
+                let appEnv =
+                        AppEnv
+                            { envOAuth = oauthEnv
+                            , envAuth = authEnv
+                            , envConfig = config
+                            , envTracer = httpTracer
+                            , envJWT = jwtSettings
+                            , envServerState = stateVar
+                            , envTimeProvider = Nothing -- Use real IO time
+                            }
+
+                -- Use mcpAppWithOAuth for full OAuth support (polymorphic version)
+                let app = mcpAppWithOAuth (runAppM appEnv) jwtSettings
+                run (httpPort config) app
+            else
+                -- Use runServerHTTP for non-OAuth mode
+                runServerHTTP config httpTracer

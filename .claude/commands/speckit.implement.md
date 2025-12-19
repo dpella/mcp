@@ -36,6 +36,7 @@ EVERY implementation → Delegate to implementer
 - **NEVER understand implementations** - delegate questions to analyzer subagents
 - **NEVER search codebase** - delegate search tasks to analyzer subagents
 - **NEVER debug or test code** - delegate to test/debug subagents
+- **NEVER claim beads with human-required labels** - spec-clarification, spec-needed, human-required, blocked-on-human, design-decision
 - **FORBIDDEN: Read/Grep/Glob on source code** - ONLY use on spec, plans, etc. files
 - **CAN create/update spec/plan files ONLY** - Single source of truth for context and progress
 - **CAN read coordination files ONLY** spec/plan/handoffs for coordination context
@@ -89,7 +90,97 @@ END PROCEDURE
 
 ## DELEGATION PROTOCOL
 
-All subagents receive a '@'-link to the relevant documents for full context.
+All subagents receive a '@'-link to the relevant documents from the `./spec` directory for full context.
+
+### Implementer Subagent Requirements
+
+**MANDATORY**: Every implementer subagent prompt MUST include:
+
+```
+REQUIRED SKILL: You MUST invoke the `test-driven-development` skill BEFORE writing any code.
+This is non-negotiable. No production code without a failing test first.
+
+Skill invocation: Use the Skill tool with skill: "test-driven-development"
+```
+
+**Implementer prompt template**:
+
+Use '@'-links for _essential_ files, refer to them normally for progressive
+disclosure (be judicious)
+
+```
+## Task
+<full task description and details from bead>
+
+## Context
+./specs/XXX-feature-name/spec.md ./specs/XXX-feature-name/plan.md ./.specify/memory/constitution.md
+
+## MANDATORY: Test-Driven Development
+You MUST invoke the `test-driven-development` skill BEFORE writing ANY implementation code.
+Follow the RED-GREEN-REFACTOR cycle strictly:
+1. Write a failing test first
+2. Watch it fail (verify RED)
+3. Use the commit skill, clearly mention it is an intentional failing test
+3. Write minimal code to pass
+4. Watch it pass (verify GREEN)
+5. Refactor if needed
+
+**CRITICAL**
+- NO tests without assertions ("this test proves code compiles": tautology if typed language!)
+- NO trivial assertions (eg: True `shouldBe` True)
+- NO tests for trivial things a strongly typed language prevents
+
+Violation of TDD = task rejection. Code written before tests = delete and restart.
+
+## Deliverables
+- Tests written FIRST, verified to fail
+- Minimal implementation to pass tests
+- All tests passing
+- Git commit MUST use the commit skill
+```
+
+### Reviewer Subagent Requirements
+
+**MANDATORY**: After every implementer completes, launch a reviewer subagent.
+
+**Reviewer prompt template**:
+```
+## Review Task
+Review implementation for task: <task-id>
+
+## Review Against
+- specs/XXX-feature-name/spec.md - Feature specification (AUTHORITATIVE)
+- .specify/memory/constitution.md - Project principles and constraints (if exists)
+- specs/XXX-feature-name/plan.md - Technical architecture
+- CLAUDE.md - Style and coding standards (if exists)
+
+## Review Checklist
+1. **Spec Conformance**: Does implementation match spec requirements exactly?
+2. **TDD Compliance**: Were tests written first? Do tests verify behavior, not implementation?
+3. **Constitution Adherence**: Does code follow project principles?
+4. **Style Compliance**: Does code follow project style guides?
+5. **No Over-Engineering**: Is implementation minimal for requirements?
+6. **No Under-Engineering**: Are all spec requirements addressed?
+
+## Output Format
+```
+REVIEW RESULT: [PASS | FAIL | BLOCKER]
+
+If PASS:
+  - Confirmation of spec conformance
+  - Any minor observations (non-blocking)
+
+If FAIL:
+  - Specific violations found
+  - Required changes (actionable list)
+  - Files and line numbers affected
+
+If BLOCKER:
+  - Spec ambiguity or contradiction found
+  - What clarification is needed
+  - Suggested spec question for human
+```
+```
 
 ### When Coordinator Needs Information
 ```
@@ -223,11 +314,41 @@ REMINDER: You CANNOT analyze code to understand it. Every technical question nee
    - **Terraform**: `.terraform/`, `*.tfstate*`, `*.tfvars`, `.terraform.lock.hcl`
    - **Kubernetes/k8s**: `*.secret.yaml`, `secrets/`, `.kube/`, `kubeconfig*`, `*.key`, `*.crt`
 
-6. **Find ready work**: Run `bd ready --json | jq '.[0]'` to get the next unblocked task.
+6. **Find ready work**:
+
+   ```bash
+   bd ready --json | jq '.[0]'
+   ```
+
+   **FORBIDDEN LABELS - NEVER claim beads with these labels:**
+   - `spec-clarification` - Requires human to clarify spec
+   - `spec-needed` - Requires human to write spec
+   - `human-required` - Explicitly needs human action
+   - `blocked-on-human` - Waiting for human input
+   - `design-decision` - Requires human architectural decision
+
+   ```
+   GUARDRAIL CHECK (before claiming ANY task):
+
+   task_labels = get_labels_from_bead(task)
+   FORBIDDEN = ["spec-clarification", "spec-needed", "human-required",
+                "blocked-on-human", "design-decision"]
+
+   IF any(label in FORBIDDEN for label in task_labels):
+       → DO NOT claim this task
+       → Log: "Skipping <task-id>: has forbidden label '<label>' - requires human"
+       → Find next ready task
+       → IF no eligible tasks remain:
+           → Report to user: "All ready tasks require human input"
+           → List tasks with forbidden labels and why
+           → STOP
+   ```
+
    - If no ready tasks: Check `bd blocked` to see what's waiting
    - Display task details: ID, title, description, priority, labels
+   - Verify task has no forbidden labels before proceeding
 
-7. **Execute implementation loop**:
+7. **Execute implementation loop** (Implement → Review → Iterate):
 
    For each task:
 
@@ -236,19 +357,78 @@ REMINDER: You CANNOT analyze code to understand it. Every technical question nee
       bd update <task-id> --status in_progress --json
       ```
 
-   b. **Delegate to implementer subagent** with task details from the bead
+   b. **Delegate to implementer subagent** (see Implementer Subagent Requirements above)
+      - MUST include TDD skill invocation requirement
+      - MUST link to spec.md, plan.md, constitution.md
+      - Implementer writes tests FIRST, then minimal implementation
 
    c. **Handle discoveries** (CRITICAL - see Proactive Discovery Protocol below)
 
-   d. **Complete task when done**:
-      ```bash
-      bd close <task-id> --reason "Implemented: <brief summary>" --json
+   d. **Launch reviewer subagent** (MANDATORY after every implementation):
+      - Use Reviewer Subagent Requirements template above
+      - Reviewer checks: spec conformance, TDD compliance, constitution, style
+      - Wait for review result: PASS, FAIL, or BLOCKER
+
+   e. **Process review result**:
+
+      ```
+      REVIEW LOOP:
+
+      IF review_result == PASS:
+          → Proceed to verification (step f)
+
+      IF review_result == FAIL:
+          → Log violations found
+          → Launch implementer subagent with:
+              - Original task context
+              - Reviewer's specific violations list
+              - Required changes
+          → Return to step (d) - launch reviewer again
+          → Max iterations: 3 (then escalate to human)
+
+      IF review_result == BLOCKER:
+          → Create spec-clarification bead:
+              bd create "Spec clarification needed: <issue>" -t task -p 1 \
+                -l blocker -l spec-clarification \
+                -d "Review found: <ambiguity>. Question: <what needs clarification>" \
+                --json
+          → Link to current task:
+              bd dep add <new-id> <current-task-id> --type blocks
+          → STOP processing this task
+          → Move to next ready task
+          → Report blocker to user
       ```
 
-   e. **Find next ready task**:
+   f. **Verify before closing** (CRITICAL - prevents false completion):
+
+      For test-related tasks, delegate verification to a subagent:
+      ```
+      VERIFY CHECKLIST (delegate to analyzer/test subagent):
+      □ Tests RUN (not just compile) - check actual test output
+      □ Pending count is 0 - reject "X examples, Y failures, Z pending" where Z > 0
+      □ Expected test names appear in output - not shadowed by stubs
+      □ No `undefined` or `pendingWith` in new test code
+      □ Review result was PASS
+      ```
+
+      **STOP conditions** (do NOT close bead):
+      - Test output shows `pending` > 0 without explicit justification
+      - Expected spec functions don't appear in test run output
+      - Module exists in both `src/` and `test/` with same name (shadowing)
+      - Review result was not PASS
+
+      Only after verification passes:
+      ```bash
+      bd close <task-id> --reason "Implemented: <brief summary>. Verified: X tests pass, 0 pending. Review: PASS." --json
+      ```
+
+   g. **Find next ready task** (apply guardrails):
       ```bash
       bd ready --json | jq '.[0]'
       ```
+      → Apply GUARDRAIL CHECK from step 6 before claiming
+      → Skip tasks with forbidden labels
+      → Return to step (a) with eligible task
 
 8. **Progress tracking and error handling**:
    - Report progress after each completed task
@@ -282,14 +462,17 @@ Create a bead immediately when you:
 
 ### How to Create Discovery Beads
 
+**MANDATORY**: All discovery beads MUST use `--parent $EPIC_ID` to maintain epic hierarchy.
+
 ```bash
-# 1. Create the discovered issue
+# Create discovered issue (MUST be under feature epic)
 bd create "TODO: Add input validation for edge case" -t task -p 3 \
   -l discovered \
+  --parent $EPIC_ID \
   -d "Found in src/handlers/user.py:142. Need to validate email format before processing." \
   --json
 
-# 2. Link it to the task where it was discovered
+# Link to task where discovered
 bd dep add <new-id> <current-task-id> --type discovered-from
 ```
 

@@ -6,16 +6,25 @@
 
 {- |
 Module      : MCP.Server.Auth
-Description : MCP-compliant OAuth 2.1 authentication
-Copyright   : (C) 2025 Matthias Pall Gissurarson
+Description : MCP-compliant OAuth 2.1 authentication with pluggable credential backends
+Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
 License     : MIT
-Maintainer  : mpg@mpg.is
+Maintainer  : mpg@mpg.is, alberto.valverde@pakenergy.com
 Stability   : experimental
 Portability : GHC
 
-This module provides MCP-compliant OAuth 2.1 authentication with PKCE support.
+This module provides MCP-compliant OAuth 2.1 authentication with PKCE support,
+and re-exports the credential authentication backend types.
+
+== Re-exports
+
+* "Servant.OAuth2.IDP.Auth.Backend" - AuthBackend typeclass for pluggable credential validation
+* "Servant.OAuth2.IDP.Auth.Demo" - Demo implementation with hardcoded credentials
 -}
 module MCP.Server.Auth (
+    -- * AuthBackend typeclass (re-exported from Servant.OAuth2.IDP.Auth.Backend)
+    module Servant.OAuth2.IDP.Auth.Backend,
+
     -- * OAuth Configuration
     OAuthConfig (..),
     OAuthProvider (..),
@@ -23,7 +32,6 @@ module MCP.Server.Auth (
 
     -- * Token Validation
     TokenInfo (..),
-    validateBearerToken,
     extractBearerToken,
 
     -- * PKCE Support
@@ -34,44 +42,38 @@ module MCP.Server.Auth (
 
     -- * Metadata Discovery
     OAuthMetadata (..),
-    discoverOAuthMetadata,
 
     -- * Protected Resource Metadata (RFC 9728)
     ProtectedResourceMetadata (..),
     ProtectedResourceAuth,
     ProtectedResourceAuthConfig (..),
-
-    -- * Credential Management
-    CredentialStore (..),
-    HashedPassword (..),
-    mkHashedPassword,
-    validateCredential,
-    defaultDemoCredentialStore,
 ) where
 
-import Control.Monad.IO.Class (MonadIO, liftIO)
+-- Re-exports
+import Servant.OAuth2.IDP.Auth.Backend
+
 import Crypto.Hash (hashWith)
 import Crypto.Hash.Algorithms (SHA256 (..))
+import Crypto.Random (getRandomBytes)
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Aeson qualified as Aeson
 import Data.ByteArray (convert)
 import Data.ByteString (ByteString)
-import Data.ByteString qualified as BS
 import Data.ByteString.Base64.URL qualified as B64URL
-import Data.ByteString.Lazy qualified as LBS
-import Data.Map.Strict (Map)
-import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
-import Data.Time.Clock (UTCTime, getCurrentTime)
-import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 import GHC.Generics (Generic)
-import Network.HTTP.Simple (addRequestHeader, getResponseBody, httpJSON, parseRequest, setRequestBodyJSON, setRequestMethod)
-import Plow.Logging (IOTracer)
-import System.Random (newStdGen, randomRs)
 
-import MCP.Trace.OAuth (OAuthTrace (..))
+import Servant.OAuth2.IDP.Types (
+    ClientAuthMethod (..),
+    CodeChallenge (..),
+    CodeChallengeMethod (..),
+    CodeVerifier (..),
+    GrantType (..),
+    ResponseType (..),
+    Scope (..),
+ )
 
 -- | OAuth grant types supported by MCP
 data OAuthGrantType
@@ -98,17 +100,16 @@ data OAuthProvider = OAuthProvider
 data OAuthConfig = OAuthConfig
     { oauthEnabled :: Bool
     , oauthProviders :: [OAuthProvider]
-    , tokenValidationEndpoint :: Maybe Text -- For validating tokens
     , requireHTTPS :: Bool -- MCP requires HTTPS for OAuth
     -- Configurable timing parameters
     , authCodeExpirySeconds :: Int
     , accessTokenExpirySeconds :: Int
     , -- Configurable OAuth parameters
-      supportedScopes :: [Text]
-    , supportedResponseTypes :: [Text]
-    , supportedGrantTypes :: [Text]
-    , supportedAuthMethods :: [Text]
-    , supportedCodeChallengeMethods :: [Text]
+      supportedScopes :: [Scope]
+    , supportedResponseTypes :: [ResponseType]
+    , supportedGrantTypes :: [GrantType]
+    , supportedAuthMethods :: [ClientAuthMethod]
+    , supportedCodeChallengeMethods :: [CodeChallengeMethod]
     , -- Demo mode settings
       autoApproveAuth :: Bool
     , demoUserIdTemplate :: Maybe Text -- Nothing means no demo mode
@@ -125,18 +126,9 @@ data OAuthConfig = OAuthConfig
       credentialStore :: CredentialStore
     , loginSessionExpirySeconds :: Int
     }
-    deriving (Show, Generic)
+    deriving (Generic)
 
--- | Hashed password wrapper
-newtype HashedPassword = HashedPassword {unHashedPassword :: Text}
-    deriving (Show, Eq)
-
--- | In-memory credential store
-data CredentialStore = CredentialStore
-    { storeCredentials :: Map Text HashedPassword -- username -> hashed password
-    , storeSalt :: Text -- Server-wide salt for hashing
-    }
-    deriving (Show, Generic)
+-- Note: No Show instance because CredentialStore contains ScrubbedBytes (no Show)
 
 -- | PKCE challenge data
 data PKCEChallenge = PKCEChallenge
@@ -154,11 +146,11 @@ data OAuthMetadata = OAuthMetadata
     , registrationEndpoint :: Maybe Text
     , userInfoEndpoint :: Maybe Text
     , jwksUri :: Maybe Text
-    , scopesSupported :: Maybe [Text]
-    , responseTypesSupported :: [Text]
-    , grantTypesSupported :: Maybe [Text]
-    , tokenEndpointAuthMethodsSupported :: Maybe [Text]
-    , codeChallengeMethodsSupported :: Maybe [Text]
+    , scopesSupported :: Maybe [Scope]
+    , responseTypesSupported :: [ResponseType]
+    , grantTypesSupported :: Maybe [GrantType]
+    , tokenEndpointAuthMethodsSupported :: Maybe [ClientAuthMethod]
+    , codeChallengeMethodsSupported :: Maybe [CodeChallengeMethod]
     }
     deriving (Show, Generic)
 
@@ -172,7 +164,7 @@ data ProtectedResourceMetadata = ProtectedResourceMetadata
     {- ^ List of authorization server issuer identifiers
     Required for MCP. At least one entry.
     -}
-    , scopesSupported :: Maybe [Text]
+    , scopesSupported :: Maybe [Scope]
     {- ^ Scope values the resource server understands
     Optional. e.g., ["mcp:read", "mcp:write"]
     -}
@@ -281,91 +273,11 @@ extractBearerToken authHeader =
         ["Bearer", token] -> Just token
         _ -> Nothing
 
--- | Validate a bearer token
-validateBearerToken :: (MonadIO m) => IOTracer OAuthTrace -> OAuthConfig -> Text -> m (Either Text TokenInfo)
-validateBearerToken _tracer config token = do
-    -- Basic validation
-    if T.null token
-        then return $ Left "Empty token"
-        else case tokenValidationEndpoint config of
-            Just endpoint -> introspectToken _tracer endpoint token
-            Nothing -> do
-                -- Without an introspection endpoint, perform basic JWT validation
-                -- In production, this should:
-                -- 1. Verify JWT signature using JWK from jwks_uri
-                -- 2. Check expiration time
-                -- 3. Validate issuer and audience
-                -- 4. Check token type is "Bearer"
-
-                -- For now, decode JWT payload (middle part) for basic validation
-                case T.splitOn "." token of
-                    [_header, payload, _signature] -> do
-                        currentTime <- liftIO getCurrentTime
-                        case decodeJWTPayload payload of
-                            Right tokenInfo ->
-                                case validateTokenClaims tokenInfo currentTime of
-                                    Right _ -> return $ Right tokenInfo
-                                    Left err -> return $ Left err
-                            Left err -> return $ Left $ "Invalid JWT format: " <> err
-                    _ -> return $ Left "Invalid JWT structure"
-
--- | Introspect token using OAuth introspection endpoint
-introspectToken :: (MonadIO m) => IOTracer OAuthTrace -> Text -> Text -> m (Either Text TokenInfo)
-introspectToken _tracer endpoint token = liftIO $ do
-    let url = T.unpack endpoint
-    request <- parseRequest url
-    let requestWithBody =
-            setRequestMethod "POST" $
-                setRequestBodyJSON (Aeson.object [("token", Aeson.String token)]) $
-                    addRequestHeader "Content-Type" "application/json" request
-
-    response <- httpJSON requestWithBody
-    let tokenInfo = getResponseBody response
-
-    if active tokenInfo
-        then return $ Right tokenInfo
-        else return $ Left "Token is not active"
-
--- | Decode JWT payload (base64url encoded JSON)
-decodeJWTPayload :: Text -> Either Text TokenInfo
-decodeJWTPayload payload =
-    case B64URL.decodeUnpadded (TE.encodeUtf8 payload) of
-        Right decodedBytes ->
-            case Aeson.decode' (LBS.fromStrict decodedBytes) of
-                Just info -> Right info{active = True} -- JWT is implicitly active
-                Nothing -> Left "Failed to parse JWT payload"
-        Left _ -> Left "Invalid base64url encoding"
-
--- | Validate token claims (expiration, not-before, etc.)
-validateTokenClaims :: TokenInfo -> UTCTime -> Either Text ()
-validateTokenClaims tokenInfo currentTime = do
-    let currentTimestamp = floor (realToFrac (utcTimeToPOSIXSeconds currentTime) :: Double) :: Integer
-
-    -- Check expiration
-    case MCP.Server.Auth.exp tokenInfo of
-        Just expTime ->
-            if currentTimestamp > expTime
-                then Left "Token has expired"
-                else Right ()
-        Nothing -> Right ()
-
-    -- Check not-before
-    case MCP.Server.Auth.nbf tokenInfo of
-        Just nbfTime ->
-            if currentTimestamp < nbfTime
-                then Left "Token not yet valid"
-                else Right ()
-        Nothing -> Right ()
-
-    return ()
-
 -- | Generate a cryptographically secure code verifier for PKCE
 generateCodeVerifier :: IO Text
 generateCodeVerifier = do
-    gen <- newStdGen
-    let chars = ['A' .. 'Z'] ++ ['a' .. 'z'] ++ ['0' .. '9'] ++ "-._~"
-    let verifier = take 128 $ randomRs (0, length chars - 1) gen
-    return $ T.pack $ map (chars !!) verifier
+    bytes <- getRandomBytes 32 -- 32 bytes = 256 bits entropy
+    pure $ TE.decodeUtf8 $ B64URL.encodeUnpadded bytes -- 43 chars
 
 -- | Generate code challenge from verifier using SHA256 (S256 method)
 generateCodeChallenge :: Text -> Text
@@ -376,16 +288,8 @@ generateCodeChallenge verifier =
      in TE.decodeUtf8 $ B64URL.encodeUnpadded challengeBytes
 
 -- | Validate PKCE code verifier against challenge
-validateCodeVerifier :: Text -> Text -> Bool
-validateCodeVerifier verifier challenge = generateCodeChallenge verifier == challenge
-
--- | Discover OAuth metadata from a well-known endpoint
-discoverOAuthMetadata :: (MonadIO m) => IOTracer OAuthTrace -> Text -> m (Either String OAuthMetadata)
-discoverOAuthMetadata _tracer issuerUrl = liftIO $ do
-    let wellKnownUrl = T.unpack issuerUrl <> "/.well-known/openid-configuration"
-    request <- parseRequest wellKnownUrl
-    response <- httpJSON request
-    return $ Right (getResponseBody response)
+validateCodeVerifier :: CodeVerifier -> CodeChallenge -> Bool
+validateCodeVerifier (CodeVerifier verifier) (CodeChallenge challenge) = generateCodeChallenge verifier == challenge
 
 -- | Type-level tag for MCP protected resource authentication
 data ProtectedResourceAuth
@@ -398,48 +302,3 @@ newtype ProtectedResourceAuthConfig = ProtectedResourceAuthConfig
     -}
     }
     deriving (Show, Generic)
-
--- | Create a hashed password from plaintext using SHA256
-mkHashedPassword :: Text -> Text -> HashedPassword
-mkHashedPassword salt password =
-    let saltedPassword = salt <> password
-        passwordBytes = TE.encodeUtf8 saltedPassword
-        hashBytes = hashWith SHA256 passwordBytes
-        hashByteString = convert hashBytes :: ByteString
-     in HashedPassword $ TE.decodeUtf8 $ B64URL.encodeUnpadded hashByteString
-
--- | Validate a credential against the store using constant-time comparison
-validateCredential :: CredentialStore -> Text -> Text -> Bool
-validateCredential store username password =
-    case Map.lookup username (storeCredentials store) of
-        Nothing -> False
-        Just storedHash ->
-            let candidateHash = mkHashedPassword (storeSalt store) password
-             in constantTimeCompare (unHashedPassword storedHash) (unHashedPassword candidateHash)
-
--- | Constant-time string comparison to prevent timing attacks
-constantTimeCompare :: Text -> Text -> Bool
-constantTimeCompare a b =
-    let bytesA = TE.encodeUtf8 a
-        bytesB = TE.encodeUtf8 b
-     in constantTimeCompareBytes bytesA bytesB
-  where
-    constantTimeCompareBytes :: ByteString -> ByteString -> Bool
-    constantTimeCompareBytes xs ys
-        | BS.length xs /= BS.length ys = False
-        | otherwise =
-            let differences = zipWith (/=) (BS.unpack xs) (BS.unpack ys)
-             in not (or differences)
-
--- | Default demo credential store with test accounts
-defaultDemoCredentialStore :: CredentialStore
-defaultDemoCredentialStore =
-    let salt = "mcp-demo-salt"
-     in CredentialStore
-            { storeCredentials =
-                Map.fromList
-                    [ ("demo", mkHashedPassword salt "demo123")
-                    , ("admin", mkHashedPassword salt "admin456")
-                    ]
-            , storeSalt = salt
-            }

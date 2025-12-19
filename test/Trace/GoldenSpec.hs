@@ -3,7 +3,7 @@
 {- |
 Module      : Trace.GoldenSpec
 Description : Golden tests for trace rendering output format
-Copyright   : (c) 2025
+Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
 License     : MIT
 
 Tests for SC-005: Golden tests for render output.
@@ -104,9 +104,6 @@ spec = do
                 renderStdIOTrace trace `shouldBe` "[StdIO:Protocol] [Protocol] Request received: method='prompts/list', id='req-1'"
 
         describe "HTTPTrace golden outputs" $ do
-            it "HTTPPlaceholder produces expected format" $ do
-                renderHTTPTrace HTTPPlaceholder `shouldBe` "[HTTP] (skeleton)"
-
             it "HTTPServerStarting produces expected format" $ do
                 let trace = HTTPServerStarting{tracePort = 8080, traceBaseUrl = "http://localhost:8080"}
                 renderHTTPTrace trace `shouldBe` "[HTTP] Server starting on port 8080 (http://localhost:8080)"

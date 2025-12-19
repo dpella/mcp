@@ -3,8 +3,11 @@
 {- |
 Module      : MCP.Trace.StdIO
 Description : StdIO transport tracing types
-Copyright   : (c) 2025
+Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
 License     : MIT
+Maintainer  : mpg@mpg.is, alberto.valverde@pakenergy.com
+Stability   : experimental
+Portability : GHC
 
 StdIO transport tracing types for structured logging of StdIO-specific events.
 -}

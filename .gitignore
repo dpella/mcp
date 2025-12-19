@@ -23,3 +23,8 @@ cabal.project.local~
 .ghc.environment.*result*
 *.sw?
 result
+bug-analyses
+core-reviews
+cabal.project.freeze
+code-reviews
+*.log

@@ -3,8 +3,11 @@
 {- |
 Module      : MCP.Trace.Operation
 Description : MCP operation tracing types
-Copyright   : (c) 2025
+Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
 License     : MIT
+Maintainer  : mpg@mpg.is, alberto.valverde@pakenergy.com
+Stability   : experimental
+Portability : GHC
 
 MCP operation tracing types for structured logging of MCP-specific events
 (tool calls, prompt operations, resource operations, completions).

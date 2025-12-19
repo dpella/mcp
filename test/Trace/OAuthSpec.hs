@@ -3,7 +3,7 @@
 {- |
 Module      : Trace.OAuthSpec
 Description : Tests for OAuth trace rendering and integration
-Copyright   : (c) 2025
+Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
 License     : MIT
 
 Tests for SC-003: OAuth flow traces.

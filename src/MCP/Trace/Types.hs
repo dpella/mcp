@@ -3,8 +3,11 @@
 {- |
 Module      : MCP.Trace.Types
 Description : Root trace type hierarchy for MCP library
-Copyright   : (c) 2025
+Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
 License     : MIT
+Maintainer  : mpg@mpg.is, alberto.valverde@pakenergy.com
+Stability   : experimental
+Portability : GHC
 
 Root trace type that composes all subsystem traces. Provides a unified
 tracing interface with re-exports of all trace types for convenience.

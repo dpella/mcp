@@ -344,7 +344,6 @@ test/
 - **jose**: JSON Object Signing and Encryption
 - **cryptonite**: Cryptographic primitives for PKCE
 - **base64-bytestring**: Base64 encoding for PKCE challenges
-- **http-conduit**: HTTP client for OAuth metadata discovery
 
 ### Testing with MCP Clients
 

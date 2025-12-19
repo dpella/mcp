@@ -3,8 +3,11 @@
 {- |
 Module      : MCP.Trace.HTTP
 Description : HTTP transport tracing types
-Copyright   : (c) 2025
+Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
 License     : MIT
+Maintainer  : mpg@mpg.is, alberto.valverde@pakenergy.com
+Stability   : experimental
+Portability : GHC
 
 HTTP transport tracing types for structured logging of HTTP-specific events.
 -}
@@ -20,18 +23,15 @@ import MCP.Trace.OAuth (OAuthTrace, renderOAuthTrace)
 import MCP.Trace.Operation (OperationTrace, renderOperationTrace)
 import MCP.Trace.Protocol (ProtocolTrace, renderProtocolTrace)
 import MCP.Trace.Server (ServerTrace, renderServerTrace)
+import Servant.OAuth2.IDP.Boundary (OAuthBoundaryTrace (..))
 
 {- | HTTP transport-specific events.
 
-Current implementation is a skeleton with composite constructors.
-Full implementation with leaf constructors will be added in Phase 3.
+Defines trace events for observability of HTTP server operations including
+server lifecycle, request handling, OAuth flows, and MCP message processing.
 -}
 data HTTPTrace
-    = {- | Placeholder constructor for Phase 2 skeleton.
-      Will be replaced with leaf constructors (HTTPServerStarting, etc.) in Phase 3.
-      -}
-      HTTPPlaceholder
-    | -- | HTTP server starting up
+    = -- | HTTP server starting up
       HTTPServerStarting
         { tracePort :: Int
         , traceBaseUrl :: Text
@@ -84,15 +84,15 @@ data HTTPTrace
       HTTPServer ServerTrace
     | -- | Nested MCP operation events in HTTP context.
       HTTPOperation OperationTrace
+    | -- | OAuth boundary error translation events
+      HTTPOAuthBoundary OAuthBoundaryTrace
     deriving (Show, Eq)
 
 {- | Render an HTTPTrace to human-readable text.
 
-Current implementation is a stub for Phase 2 skeleton.
 Delegates to sub-renders for nested events.
 -}
 renderHTTPTrace :: HTTPTrace -> Text
-renderHTTPTrace HTTPPlaceholder = "[HTTP] (skeleton)"
 renderHTTPTrace (HTTPServerStarting p baseUrl) =
     "[HTTP] Server starting on port " <> T.pack (show p) <> " (" <> baseUrl <> ")"
 renderHTTPTrace HTTPServerStarted =
@@ -121,3 +121,11 @@ renderHTTPTrace (HTTPProtocol pt) = "[HTTP:Protocol] " <> renderProtocolTrace pt
 renderHTTPTrace (HTTPOAuth ot) = "[HTTP:OAuth] " <> renderOAuthTrace ot
 renderHTTPTrace (HTTPServer st) = "[HTTP:Server] " <> renderServerTrace st
 renderHTTPTrace (HTTPOperation ot) = "[HTTP] " <> renderOperationTrace ot
+renderHTTPTrace (HTTPOAuthBoundary bt) = "[HTTP:OAuth:Boundary] " <> renderBoundaryTrace bt
+  where
+    renderBoundaryTrace :: OAuthBoundaryTrace -> Text
+    renderBoundaryTrace (BoundaryStoreError msg) = "Storage error (details logged): " <> msg
+    renderBoundaryTrace (BoundaryAuthError msg) = "Auth error (details logged): " <> msg
+    renderBoundaryTrace (BoundaryValidationError _) = "Validation error (safe to expose)"
+    renderBoundaryTrace (BoundaryAuthorizationError _) = "Authorization error (safe to expose)"
+    renderBoundaryTrace (BoundaryLoginFlowError _) = "Login flow error (safe to expose, rendered as HTML)"

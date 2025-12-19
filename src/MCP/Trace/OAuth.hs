@@ -4,8 +4,11 @@
 {- |
 Module      : MCP.Trace.OAuth
 Description : OAuth 2.0 flow tracing types
-Copyright   : (c) 2025
+Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
 License     : MIT
+Maintainer  : mpg@mpg.is, alberto.valverde@pakenergy.com
+Stability   : experimental
+Portability : GHC
 
 OAuth tracing types for structured logging of OAuth flows.
 

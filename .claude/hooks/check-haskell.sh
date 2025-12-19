@@ -11,7 +11,7 @@ if [[ ! "$file_path" == *.hs ]]; then
   exit 0
 fi
 
-cd "$CLAUDE_PROJECT_DIR" || exit 0
+cd "$CLAUDE_PROJECT_DIR" || exit 1
 
 output=$(cabal build 2>&1)
 result=$?

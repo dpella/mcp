@@ -4,7 +4,7 @@
 {- |
 Module      : Trace.FilterSpec
 Description : Tests for trace filtering functionality
-Copyright   : (c) 2025
+Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
 License     : MIT
 
 Tests for SC-006: filterTracer with predicates.

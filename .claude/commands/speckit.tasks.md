@@ -11,6 +11,10 @@ handoffs:
     send: true
 ---
 
+## Tools
+
+MUST use the beads-project-tracking skill for effective beads usage
+
 ## User Input
 
 ```text

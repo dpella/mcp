@@ -3,7 +3,7 @@
 {- |
 Module      : Trace.RenderSpec
 Description : Tests for trace rendering functions
-Copyright   : (c) 2025
+Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
 License     : MIT
 
 Tests for SC-004: Render functions totality and correctness.
@@ -165,11 +165,6 @@ spec = do
 
     describe "MCP.Trace.HTTP rendering" $ do
         describe "renderHTTPTrace" $ do
-            it "renders HTTPPlaceholder without error" $ do
-                let trace = HTTPPlaceholder
-                    rendered = renderHTTPTrace trace
-                rendered `shouldSatisfy` (not . T.null)
-
             it "renders HTTPServerStarting without error" $ do
                 let trace = HTTPServerStarting{tracePort = 8080, traceBaseUrl = "http://localhost:8080"}
                     rendered = renderHTTPTrace trace

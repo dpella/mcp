@@ -3,8 +3,11 @@
 {- |
 Module      : MCP.Trace.Server
 Description : Server lifecycle tracing types
-Copyright   : (c) 2025
+Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
 License     : MIT
+Maintainer  : mpg@mpg.is, alberto.valverde@pakenergy.com
+Stability   : experimental
+Portability : GHC
 
 Server tracing types for structured logging of server lifecycle and state changes.
 -}

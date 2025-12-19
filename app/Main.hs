@@ -5,6 +5,17 @@
 -- that has a "_meta" field; is this expected behavior?
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
+{- |
+Module      : Main
+Description : MCP StdIO server executable
+Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
+License     : MIT
+Maintainer  : mpg@mpg.is, alberto.valverde@pakenergy.com
+Stability   : experimental
+Portability : GHC
+
+Main entry point for the MCP StdIO server executable.
+-}
 module Main where
 
 import Control.Monad.IO.Class (liftIO)

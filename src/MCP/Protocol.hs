@@ -12,9 +12,9 @@
 {- |
 Module      : MCP.Protocol
 Description : JSON-RPC protocol implementation for MCP version 2025-06-18
-Copyright   : (C) 2025 Matthias Pall Gissurarson
+Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
 License     : MIT
-Maintainer  : mpg@mpg.is
+Maintainer  : mpg@mpg.is, alberto.valverde@pakenergy.com
 Stability   : experimental
 Portability : GHC
 
@@ -768,7 +768,7 @@ $(deriveJSON defaultOptions{omitNothingFields = True, fieldLabelModifier = \case
 
 -- | Call tool result
 data CallToolResult = CallToolResult
-    { content :: [Content]
+    { content :: [ContentBlock]
     , structuredContent :: Maybe Value
     , isError :: Maybe Bool
     , _meta :: Maybe Metadata

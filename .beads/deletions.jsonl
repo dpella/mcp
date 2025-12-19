@@ -6,3 +6,7 @@
 {"id":"mcp-qjy","ts":"2025-12-10T11:13:58.299577999Z","by":"claude","reason":"manual delete"}
 {"id":"mcp-0l4","ts":"2025-12-10T11:13:59.766583331Z","by":"claude","reason":"manual delete"}
 {"id":"mcp-vc0","ts":"2025-12-10T11:14:01.055017534Z","by":"claude","reason":"manual delete"}
+{"id":"mcp-5el","ts":"2025-12-11T14:30:43.039067614Z","by":"git-history-backfill","reason":"recovered from git history (pruned from manifest)"}
+{"id":"mcp-nyr.17","ts":"2025-12-12T08:04:13.159801252Z","by":"git-history-backfill","reason":"recovered from git history (pruned from manifest)"}
+{"id":"mcp-u9k","ts":"2025-12-12T13:08:15.615623355Z","by":"claude","reason":"manual delete"}
+{"id":"mcp-aaz","ts":"2025-12-15T11:07:22.275031337Z","by":"claude","reason":"manual delete"}

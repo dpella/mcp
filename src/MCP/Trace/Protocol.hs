@@ -3,8 +3,11 @@
 {- |
 Module      : MCP.Trace.Protocol
 Description : JSON-RPC protocol handling tracing types
-Copyright   : (c) 2025
+Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
 License     : MIT
+Maintainer  : mpg@mpg.is, alberto.valverde@pakenergy.com
+Stability   : experimental
+Portability : GHC
 
 Protocol tracing types for structured logging of JSON-RPC message handling.
 -}
