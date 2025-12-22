@@ -41,14 +41,11 @@ module MCP.Server.HTTP (
     -- * API Types
     MCPAPI,
     FullAPI,
-    OAuthAPI,
 
     -- * HTML Content Type
     HTML,
 
     -- * Login Types
-    PendingAuthorization (..),
-    LoginForm,
     LoginError (..),
     LoginResult (..),
 
@@ -112,11 +109,11 @@ import Servant.OAuth2.IDP.Errors (
     ValidationError (..),
  )
 import Servant.OAuth2.IDP.Metadata (BearerMethod (..), mkProtectedResourceMetadata, mkProtectedResourceMetadataForDemo)
-import Servant.OAuth2.IDP.Server (LoginForm, OAuthAPI, oauthServer)
+import Servant.OAuth2.IDP.Server (OAuthAPI, oauthServer)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Store.InMemory (OAuthTVarEnv, defaultExpiryConfig, newOAuthTVarEnv)
 import Servant.OAuth2.IDP.Trace (OAuthTrace)
-import Servant.OAuth2.IDP.Types (ClientAuthMethod (..), CodeChallengeMethod (..), GrantType (..), OAuthGrantType (..), PendingAuthorization (..), RedirectUri (..), ResponseType (..), Scope, UserId (..), mkScope, unUserId)
+import Servant.OAuth2.IDP.Types (ClientAuthMethod (..), CodeChallengeMethod (..), GrantType (..), OAuthGrantType (..), RedirectUri (..), ResponseType (..), Scope, UserId (..), mkScope, unUserId)
 
 -- | HTML content type for Servant
 data HTML
