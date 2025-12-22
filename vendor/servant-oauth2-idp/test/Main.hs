@@ -34,12 +34,14 @@ import Laws.AuthBackendAssociatedTypesSpec qualified as AuthBackendAssociatedTyp
 import Laws.AuthBackendSignatureSpec qualified as AuthBackendSignatureSpec
 import Laws.AuthBackendSpec (authBackendKnownCredentials, authBackendLaws)
 import Laws.AuthCodeFunctorSpec qualified as AuthCodeFunctorSpec
+import Laws.BoundarySpec qualified as BoundarySpec
 import Laws.ConsumeAuthCodeSpec (consumeAuthCodeConcurrencySpec, consumeAuthCodeSpec)
 import Laws.OAuthStateStoreSpec (oauthStateStoreLaws)
 import Laws.OAuthUserTypeSpec qualified as OAuthUserTypeSpec
 
 -- Servant OAuth2 IDP tests
 import Servant.OAuth2.IDP.APISpec qualified as APISpec
+import Servant.OAuth2.IDP.BearerMethodSpec qualified as BearerMethodSpec
 import Servant.OAuth2.IDP.BrandingSpec qualified as BrandingSpec
 import Servant.OAuth2.IDP.ConfigSpec qualified as ConfigSpec
 import Servant.OAuth2.IDP.CryptoEntropySpec qualified as CryptoEntropySpec
@@ -51,6 +53,9 @@ import Servant.OAuth2.IDP.PKCESpec qualified as PKCESpec
 import Servant.OAuth2.IDP.TokenRequestSpec qualified as TokenRequestSpec
 import Servant.OAuth2.IDP.TraceSpec qualified as TraceSpec
 import Servant.OAuth2.IDP.TypesSpec qualified as IDPTypesSpec
+
+-- NOTE: Functional.OAuthFlowSpec and Laws.ErrorBoundarySecuritySpec
+-- have MCP dependencies and remain in the mcp package test suite
 
 main :: IO ()
 main = hspec spec
@@ -96,40 +101,43 @@ spec = do
     -- Servant OAuth2 IDP tests
     describe "Servant.OAuth2.IDP" $ do
         APISpec.spec
+        BearerMethodSpec.spec
         BrandingSpec.spec
         ConfigSpec.spec
-        TokenRequestSpec.spec
-        LucidRenderingSpec.spec
-        IDPTypesSpec.spec
         CryptoEntropySpec.spec
         ErrorsSpec.spec
         HandlersMetadataSpec.spec
+        LucidRenderingSpec.spec
         MetadataSpec.spec
         PKCESpec.spec
+        TokenRequestSpec.spec
         TraceSpec.spec
+        IDPTypesSpec.spec
 
     -- Typeclass law tests (using TestM with controlled time)
-    describe "TestM OAuthStateStore" $ do
-        oauthStateStoreLaws runTestM'
-        consumeAuthCodeSpec runTestM'
-        consumeAuthCodeConcurrencySpec
-        OAuthUserTypeSpec.spec
+    describe "Laws" $ do
+        describe "TestM OAuthStateStore" $ do
+            oauthStateStoreLaws runTestM'
+            consumeAuthCodeSpec runTestM'
+            consumeAuthCodeConcurrencySpec
+            OAuthUserTypeSpec.spec
 
-    -- Functor laws
-    AuthCodeFunctorSpec.spec
+        describe "TestM AuthBackend" $ do
+            AuthBackendAssociatedTypesSpec.spec
+            AuthBackendSignatureSpec.spec
+            authBackendLaws runTestMWithDemoCreds
+            let demoUser = case mkUsername "demo" of
+                    Just u -> u
+                    Nothing -> error "Test fixture: invalid username 'demo'"
+            authBackendKnownCredentials
+                runTestMWithDemoCreds
+                demoUser
+                (mkPlaintextPassword "demo123")
+                (mkPlaintextPassword "wrongpassword")
 
-    describe "TestM AuthBackend" $ do
-        AuthBackendAssociatedTypesSpec.spec
-        AuthBackendSignatureSpec.spec
-        authBackendLaws runTestMWithDemoCreds
-        let demoUser = case mkUsername "demo" of
-                Just u -> u
-                Nothing -> error "Test fixture: invalid username 'demo'"
-        authBackendKnownCredentials
-            runTestMWithDemoCreds
-            demoUser
-            (mkPlaintextPassword "demo123")
-            (mkPlaintextPassword "wrongpassword")
+        describe "Type Laws" $ do
+            AuthCodeFunctorSpec.spec
+            BoundarySpec.spec
 
     -- Hash function tests
     describe "Servant.OAuth2.IDP.Auth.Backend" $ do

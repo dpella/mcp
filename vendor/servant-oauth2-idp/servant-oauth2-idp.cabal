@@ -106,6 +106,7 @@ test-suite servant-oauth2-idp-test
     other-modules:
         TestMonad
         Laws.AuthCodeFunctorSpec
+        Laws.BoundarySpec
         Laws.ConsumeAuthCodeSpec
         Laws.OAuthStateStoreSpec
         Laws.OAuthUserTypeSpec
@@ -113,6 +114,7 @@ test-suite servant-oauth2-idp-test
         Laws.AuthBackendAssociatedTypesSpec
         Laws.AuthBackendSignatureSpec
         Servant.OAuth2.IDP.APISpec
+        Servant.OAuth2.IDP.BearerMethodSpec
         Servant.OAuth2.IDP.BrandingSpec
         Servant.OAuth2.IDP.ConfigSpec
         Servant.OAuth2.IDP.TokenRequestSpec
