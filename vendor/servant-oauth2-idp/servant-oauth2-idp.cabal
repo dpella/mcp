@@ -1,0 +1,17 @@
+cabal-version:   3.0
+name:            servant-oauth2-idp
+version:         0.1.0.0
+synopsis:        OAuth 2.0 Identity Provider implementation for Servant
+description:     Placeholder - modules to be extracted from mcp package
+license:         MIT
+license-file:    LICENSE
+author:          MCP Contributors
+maintainer:      noreply@example.com
+category:        Web
+build-type:      Simple
+
+library
+  -- Stub library - real modules will be moved from mcp
+  -- This exists to make cabal.project valid
+  build-depends:    base >=4.18 && <5
+  default-language: GHC2021

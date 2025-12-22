@@ -1,5 +1,6 @@
 index-state: 2024-07-18T00:00:00Z
-packages: mcp.cabal
+packages: .
+           vendor/servant-oauth2-idp
 tests: True
 documentation: False
 optimization: False
