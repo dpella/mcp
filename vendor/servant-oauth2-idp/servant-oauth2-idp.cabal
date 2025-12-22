@@ -1,17 +1,150 @@
-cabal-version:   3.0
-name:            servant-oauth2-idp
-version:         0.1.0.0
-synopsis:        OAuth 2.0 Identity Provider implementation for Servant
-description:     Placeholder - modules to be extracted from mcp package
-license:         MIT
-license-file:    LICENSE
-author:          MCP Contributors
-maintainer:      noreply@example.com
-category:        Web
-build-type:      Simple
+cabal-version:      3.4
+name:               servant-oauth2-idp
+version:            0.1.0.0
+
+synopsis:           OAuth 2.1 Identity Provider implementation for Servant
+description:
+    A complete OAuth 2.1 Authorization Server implementation for Servant.
+    Provides OAuth 2.0/2.1 protocol compliance with PKCE, JWT tokens,
+    dynamic client registration, and metadata discovery (RFC 8414, RFC 9728).
+
+    Features:
+
+    * OAuth 2.1 compliant authorization server
+    * PKCE (RFC 7636) with S256 code challenge method
+    * JWT access tokens via jose
+    * Dynamic client registration (RFC 7591)
+    * Metadata discovery endpoints (RFC 8414, RFC 9728)
+    * Interactive login flow with HTML UI
+    * Pluggable storage backends via OAuthStateStore typeclass
+    * Pluggable authentication via AuthBackend typeclass
+    * In-memory TVar-based reference implementation
+    * Structured tracing support
+    * Production-ready security patterns
+
+license:            MIT
+license-file:       LICENSE
+author:             Matthias Pall Gissurarson, PakSCADA LLC
+maintainer:         mpg@mpg.is, alberto.valverde@pakenergy.com
+copyright:          (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
+category:           Web
+build-type:         Simple
+
+common warnings
+    ghc-options: -Wall -Wredundant-constraints -Wunused-packages -Wincomplete-uni-patterns -Wincomplete-record-updates
 
 library
-  -- Stub library - real modules will be moved from mcp
-  -- This exists to make cabal.project valid
-  build-depends:    base >=4.18 && <5
-  default-language: GHC2021
+    import:           warnings
+
+    exposed-modules:
+        Servant.OAuth2.IDP.API
+        Servant.OAuth2.IDP.Config
+        Servant.OAuth2.IDP.Types
+        Servant.OAuth2.IDP.Metadata
+        Servant.OAuth2.IDP.PKCE
+        Servant.OAuth2.IDP.Store
+        Servant.OAuth2.IDP.Store.InMemory
+        Servant.OAuth2.IDP.Errors
+        Servant.OAuth2.IDP.Trace
+        Servant.OAuth2.IDP.Server
+        Servant.OAuth2.IDP.Handlers
+        Servant.OAuth2.IDP.Handlers.HTML
+        Servant.OAuth2.IDP.Handlers.Metadata
+        Servant.OAuth2.IDP.Handlers.Registration
+        Servant.OAuth2.IDP.Handlers.Authorization
+        Servant.OAuth2.IDP.Handlers.Login
+        Servant.OAuth2.IDP.Handlers.Token
+        Servant.OAuth2.IDP.Test.Internal
+        Servant.OAuth2.IDP.Auth.Backend
+        Servant.OAuth2.IDP.Auth.Demo
+
+    build-depends:
+        base >= 4.18.2.1 && <= 4.21.0.0,
+        aeson >= 2.1 && < 2.3,
+        text >= 2.0 && <= 2.1.2,
+        containers >= 0.6 && < 0.7,
+        bytestring >= 0.11 && < 0.12,
+        stm >= 2.5 && < 2.6,
+        mtl >= 2.3 && < 2.4,
+        wai >= 3.2 && < 3.3,
+        wai-extra >= 3.1 && < 3.2,
+        servant-server >= 0.19 && < 0.21,
+        servant >= 0.19 && < 0.21,
+        http-types >= 0.12 && < 0.13,
+        http-media >= 0.8 && < 0.9,
+        http-api-data >= 0.6 && < 0.7,
+        servant-auth-server >= 0.4 && < 0.5,
+        jose >= 0.10 && < 0.12,
+        crypton >= 0.34 && < 2.0,
+        memory >= 0.18 && < 0.19,
+        base64-bytestring >= 1.2 && < 1.3,
+        time >= 1.12 && < 1.13,
+        uuid >= 1.3 && < 1.4,
+        data-default >= 0.7 && < 0.8,
+        plow-log ^>= 0.1.6,
+        generic-lens >= 2.2 && < 2.3,
+        network-uri >= 2.6 && < 2.7,
+        monad-time >= 0.4 && < 0.5,
+        hspec >= 2.10 && < 2.12,
+        hspec-wai >= 0.11 && < 0.12,
+        lucid >= 2.11 && < 2.12,
+        servant-lucid >= 0.9 && < 0.10,
+        QuickCheck >= 2.14 && < 2.16
+
+    hs-source-dirs:   src
+    default-language: GHC2021
+
+test-suite servant-oauth2-idp-test
+    import:           warnings
+    ghc-options:      -threaded
+
+    default-language: GHC2021
+    type:             exitcode-stdio-1.0
+    hs-source-dirs:   test
+    main-is:          Main.hs
+
+    other-modules:
+        TestMonad
+        Laws.AuthCodeFunctorSpec
+        Laws.ConsumeAuthCodeSpec
+        Laws.OAuthStateStoreSpec
+        Laws.OAuthUserTypeSpec
+        Laws.AuthBackendSpec
+        Laws.AuthBackendAssociatedTypesSpec
+        Laws.AuthBackendSignatureSpec
+        Servant.OAuth2.IDP.APISpec
+        Servant.OAuth2.IDP.BrandingSpec
+        Servant.OAuth2.IDP.ConfigSpec
+        Servant.OAuth2.IDP.TokenRequestSpec
+        Servant.OAuth2.IDP.LucidRenderingSpec
+        Servant.OAuth2.IDP.TypesSpec
+        Servant.OAuth2.IDP.CryptoEntropySpec
+        Servant.OAuth2.IDP.ErrorsSpec
+        Servant.OAuth2.IDP.Handlers.MetadataSpec
+        Servant.OAuth2.IDP.MetadataSpec
+        Servant.OAuth2.IDP.PKCESpec
+        Servant.OAuth2.IDP.TraceSpec
+
+    build-depends:
+        base >= 4.18.2.1 && <= 4.21.0.0,
+        servant-oauth2-idp,
+        text >= 2.0 && <= 2.1.2,
+        hspec >= 2.10 && < 2.12,
+        hspec-wai >= 0.11 && < 0.12,
+        QuickCheck >= 2.14 && < 2.16,
+        time >= 1.12 && < 1.13,
+        containers >= 0.6 && < 0.7,
+        mtl >= 2.3 && < 2.4,
+        monad-time >= 0.4 && < 0.5,
+        network-uri >= 2.6 && < 2.7,
+        memory >= 0.18 && < 0.19,
+        http-api-data >= 0.6 && < 0.7,
+        http-types >= 0.12 && < 0.13,
+        servant-server >= 0.19 && < 0.21,
+        servant-auth-server >= 0.4 && < 0.5,
+        stm >= 2.5 && < 2.6,
+        aeson >= 2.1 && < 2.3,
+        bytestring >= 0.11 && < 0.13,
+        async >= 2.2 && < 2.3,
+        lucid >= 2.11 && < 2.12,
+        data-default >= 0.7 && < 0.8
