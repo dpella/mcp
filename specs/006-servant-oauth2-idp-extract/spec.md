@@ -70,10 +70,11 @@ As a developer, I want the servant-oauth2-idp package to have its own CLAUDE.md 
 - **FR-001**: System MUST create a `vendor/` directory at workspace root containing the servant-oauth2-idp package
 - **FR-002**: System MUST create a `cabal.project` file that references both the mcp package and vendor/servant-oauth2-idp
 - **FR-003**: System MUST move all `src/Servant/OAuth2/IDP/**` modules from mcp to servant-oauth2-idp package
-- **FR-004**: System MUST move all tests related to Servant.OAuth2.IDP modules to the new package
+- **FR-004**: System MUST move all tests related to Servant.OAuth2.IDP modules to the new package, including `test/Servant/OAuth2/IDP/**` and `test/Laws/` tests for OAuth2 typeclasses (OAuthStateStore, AuthBackend, AuthCode laws)
+- **FR-004a**: System MUST create a minimal TestMonad in servant-oauth2-idp with OAuthStateStore, AuthBackend, and MonadTime instances to run the polymorphic Laws specs (mcp retains its TestMonad for integration tests)
 - **FR-005**: System MUST update mcp's cabal file to depend on servant-oauth2-idp instead of containing OAuth2 modules
-- **FR-006**: System MUST preserve re-exports from MCP.Server.HTTP that reference OAuth2 types (import from servant-oauth2-idp)
-- **FR-007**: System MUST create a servant-oauth2-idp.cabal with appropriate metadata and dependencies
+- **FR-006**: System MUST NOT re-export OAuth2 types from MCP.Server.HTTP; internal imports from servant-oauth2-idp are used only for implementation, not public API
+- **FR-007**: System MUST create a servant-oauth2-idp.cabal with version `0.1.0.0`, appropriate license, category, and dependencies
 - **FR-008**: System MUST extract git history for Servant.OAuth2.IDP files into ~/vendor/servant-oauth2-idp using git filter-repo
 - **FR-009**: System MUST copy the .specify directory (constitution and templates) to the extracted repository
 - **FR-010**: System MUST create a CLAUDE.md file specific to the servant-oauth2-idp package
@@ -98,6 +99,15 @@ As a developer, I want the servant-oauth2-idp package to have its own CLAUDE.md 
 - **SC-004**: Git history in ~/vendor/servant-oauth2-idp shows 100% of commits that touched Servant.OAuth2.IDP files
 - **SC-005**: CLAUDE.md file provides sufficient context for AI assistants to work with the package without referencing mcp documentation
 - **SC-006**: The .specify directory in extracted repository enables all speckit workflows (/speckit.specify, /speckit.plan, /speckit.implement)
+
+## Clarifications
+
+### Session 2025-12-22
+
+- Q: What initial version should servant-oauth2-idp use? → A: `0.1.0.0` (pre-release; API may change)
+- Q: Should Laws tests for OAuth2 typeclasses move to servant-oauth2-idp? → A: Yes, move with the typeclasses they test
+- Q: Should MCP.Server.HTTP re-export OAuth2 types for compatibility? → A: No re-exports; users import directly from servant-oauth2-idp (breaking change acceptable pre-release)
+- Q: Test infrastructure strategy for servant-oauth2-idp? → A: Create minimal new TestMonad in servant-oauth2-idp; mcp keeps current TestMonad for integration tests
 
 ## Assumptions
 
