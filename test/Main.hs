@@ -11,13 +11,6 @@ Portability : GHC
 -}
 module Main (main) where
 
-import Data.ByteArray qualified as BA
-import Data.Text (Text)
-import Data.Text.Encoding qualified as TE
-
--- Auth typeclass modules
-import Servant.OAuth2.IDP.Auth.Backend (Salt (..), mkHashedPassword, mkPlaintextPassword)
-
 import Test.Hspec
 
 -- Law tests (now in servant-oauth2-idp-test)
@@ -75,29 +68,3 @@ spec = do
 
     -- Security tests
     describe "Security" SessionCookieSpec.spec
-
-    -- Hash function tests
-    describe "Servant.OAuth2.IDP.Auth.Backend" $ do
-        describe "mkHashedPassword" $ do
-            it "produces consistent hashes for same inputs" $ do
-                let saltBytes = BA.convert (TE.encodeUtf8 ("test-salt" :: Text)) :: BA.ScrubbedBytes
-                    salt = Salt saltBytes
-                    password = mkPlaintextPassword "test-password"
-                    hash1 = mkHashedPassword salt password
-                    hash2 = mkHashedPassword salt password
-                (hash1 == hash2) `shouldBe` True
-
-            it "produces different hashes for different passwords" $ do
-                let saltBytes = BA.convert (TE.encodeUtf8 ("test-salt" :: Text)) :: BA.ScrubbedBytes
-                    salt = Salt saltBytes
-                    hash1 = mkHashedPassword salt (mkPlaintextPassword "test-password")
-                    hash2 = mkHashedPassword salt (mkPlaintextPassword "different-password")
-                (hash1 /= hash2) `shouldBe` True
-
-            it "produces different hashes for different salts" $ do
-                let password = mkPlaintextPassword "test-password"
-                    saltBytes1 = BA.convert (TE.encodeUtf8 ("test-salt" :: Text)) :: BA.ScrubbedBytes
-                    saltBytes2 = BA.convert (TE.encodeUtf8 ("different-salt" :: Text)) :: BA.ScrubbedBytes
-                    hash1 = mkHashedPassword (Salt saltBytes1) password
-                    hash2 = mkHashedPassword (Salt saltBytes2) password
-                (hash1 /= hash2) `shouldBe` True
