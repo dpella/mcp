@@ -1,5 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+{- HLINT ignore "Avoid partial function" -}
+
 {- |
 Module      : Trace.GoldenSpec
 Description : Golden tests for trace rendering output format
@@ -11,12 +13,16 @@ Verifies that render functions produce expected formatted output for representat
 -}
 module Trace.GoldenSpec (spec) where
 
+import Data.Maybe (fromJust)
 import MCP.Trace.HTTP (HTTPTrace (..), renderHTTPTrace)
-import MCP.Trace.OAuth (OAuthTrace (..), renderOAuthTrace)
 import MCP.Trace.Protocol (ProtocolTrace (..), renderProtocolTrace)
 import MCP.Trace.Server (ServerTrace (..), renderServerTrace)
 import MCP.Trace.StdIO (StdIOTrace (..), renderStdIOTrace)
 import MCP.Trace.Types (MCPTrace (..), renderMCPTrace)
+import Servant.OAuth2.IDP.Auth.Backend (mkUsername)
+import Servant.OAuth2.IDP.Errors (ValidationError (..))
+import Servant.OAuth2.IDP.Trace (DenialReason (..), OAuthTrace (..), OperationResult (..), renderOAuthTrace)
+import Servant.OAuth2.IDP.Types (OAuthGrantType (..), mkClientId, mkRedirectUri, mkScope, mkSessionId)
 import Test.Hspec
 
 spec :: Spec
@@ -151,61 +157,63 @@ spec = do
                 renderHTTPTrace trace `shouldBe` "[HTTP] Resource parameter (authorization): not provided"
 
         describe "OAuthTrace golden outputs (via renderOAuthTrace)" $ do
-            it "OAuthClientRegistration produces expected format" $ do
-                let trace = OAuthClientRegistration{clientId = "client-xyz", clientName = "My App"}
-                renderOAuthTrace trace `shouldBe` "Client registered: client-xyz (My App)"
+            it "TraceClientRegistration produces expected format" $ do
+                let redirectUri = fromJust $ mkRedirectUri "http://localhost/callback"
+                    trace = TraceClientRegistration (fromJust $ mkClientId "client-xyz") redirectUri
+                renderOAuthTrace trace `shouldBe` "Client registered: client-xyz (http://localhost/callback)"
 
-            it "OAuthAuthorizationRequest with scopes and state produces expected format" $ do
-                let trace = OAuthAuthorizationRequest{clientId = "client-123", scopes = ["read", "write"], hasState = True}
-                renderOAuthTrace trace `shouldBe` "Authorization request from client-123 for scopes [read, write] (with state)"
+            it "TraceAuthorizationRequest with scopes produces expected format" $ do
+                let trace = TraceAuthorizationRequest (fromJust $ mkClientId "client-123") [fromJust $ mkScope "read", fromJust $ mkScope "write"] Success
+                renderOAuthTrace trace `shouldBe` "Authorization request from client-123 for scopes [read, write]: SUCCESS"
 
-            it "OAuthAuthorizationRequest without state produces expected format" $ do
-                let trace = OAuthAuthorizationRequest{clientId = "client-456", scopes = [], hasState = False}
-                renderOAuthTrace trace `shouldBe` "Authorization request from client-456 for scopes (none)"
+            it "TraceAuthorizationRequest without scopes produces expected format" $ do
+                let trace = TraceAuthorizationRequest (fromJust $ mkClientId "client-456") [] Failure
+                renderOAuthTrace trace `shouldBe` "Authorization request from client-456 for scopes (none): FAILED"
 
-            it "OAuthLoginPageServed produces expected format" $ do
-                let trace = OAuthLoginPageServed{sessionId = "sess-abc"}
-                renderOAuthTrace trace `shouldBe` "Login page served for session sess-abc"
+            it "TraceLoginPageServed produces expected format" $ do
+                let trace = TraceLoginPageServed (fromJust $ mkSessionId "12345678-1234-5678-1234-567812345678")
+                renderOAuthTrace trace `shouldBe` "Login page served for session 12345678-1234-5678-1234-567812345678"
 
-            it "OAuthLoginAttempt success produces expected format" $ do
-                let trace = OAuthLoginAttempt{username = "demo", success = True}
+            it "TraceLoginAttempt success produces expected format" $ do
+                let trace = TraceLoginAttempt (fromJust $ mkUsername "demo") Success
                 renderOAuthTrace trace `shouldBe` "Login attempt for user demo: SUCCESS"
 
-            it "OAuthLoginAttempt failure produces expected format" $ do
-                let trace = OAuthLoginAttempt{username = "admin", success = False}
+            it "TraceLoginAttempt failure produces expected format" $ do
+                let trace = TraceLoginAttempt (fromJust $ mkUsername "admin") Failure
                 renderOAuthTrace trace `shouldBe` "Login attempt for user admin: FAILED"
 
-            it "OAuthAuthorizationGranted produces expected format" $ do
-                let trace = OAuthAuthorizationGranted{clientId = "client-789", userId = "user-456"}
+            it "TraceAuthorizationGranted produces expected format" $ do
+                let trace = TraceAuthorizationGranted (fromJust $ mkClientId "client-789") (fromJust $ mkUsername "user-456")
                 renderOAuthTrace trace `shouldBe` "Authorization granted to client client-789 by user user-456"
 
-            it "OAuthAuthorizationDenied produces expected format" $ do
-                let trace = OAuthAuthorizationDenied{clientId = "client-999", reason = "User declined"}
-                renderOAuthTrace trace `shouldBe` "Authorization denied for client client-999: User declined"
+            it "TraceAuthorizationDenied produces expected format" $ do
+                let trace = TraceAuthorizationDenied (fromJust $ mkClientId "client-999") UserDenied
+                renderOAuthTrace trace `shouldBe` "Authorization denied for client client-999: User denied"
 
-            it "OAuthTokenExchange success produces expected format" $ do
-                let trace = OAuthTokenExchange{grantType = "authorization_code", success = True}
+            it "TraceTokenExchange success produces expected format" $ do
+                let trace = TraceTokenExchange OAuthAuthorizationCode Success
                 renderOAuthTrace trace `shouldBe` "Token exchange (authorization_code): SUCCESS"
 
-            it "OAuthTokenExchange failure produces expected format" $ do
-                let trace = OAuthTokenExchange{grantType = "refresh_token", success = False}
-                renderOAuthTrace trace `shouldBe` "Token exchange (refresh_token): FAILED"
+            it "TraceTokenExchange failure produces expected format" $ do
+                let trace = TraceTokenExchange OAuthClientCredentials Failure
+                renderOAuthTrace trace `shouldBe` "Token exchange (client_credentials): FAILED"
 
-            it "OAuthTokenRefresh success produces expected format" $ do
-                let trace = OAuthTokenRefresh{success = True}
+            it "TraceTokenRefresh success produces expected format" $ do
+                let trace = TraceTokenRefresh Success
                 renderOAuthTrace trace `shouldBe` "Token refresh: SUCCESS"
 
-            it "OAuthTokenRefresh failure produces expected format" $ do
-                let trace = OAuthTokenRefresh{success = False}
+            it "TraceTokenRefresh failure produces expected format" $ do
+                let trace = TraceTokenRefresh Failure
                 renderOAuthTrace trace `shouldBe` "Token refresh: FAILED"
 
-            it "OAuthSessionExpired produces expected format" $ do
-                let trace = OAuthSessionExpired{sessionId = "sess-expired"}
-                renderOAuthTrace trace `shouldBe` "Session expired: sess-expired"
+            it "TraceSessionExpired produces expected format" $ do
+                let trace = TraceSessionExpired (fromJust $ mkSessionId "87654321-4321-8765-4321-876543218765")
+                renderOAuthTrace trace `shouldBe` "Session expired: 87654321-4321-8765-4321-876543218765"
 
-            it "OAuthValidationError produces expected format" $ do
-                let trace = OAuthValidationError{errorType = "invalid_request", validationDetail = "Missing redirect_uri"}
-                renderOAuthTrace trace `shouldBe` "Validation error [invalid_request]: Missing redirect_uri"
+            it "TraceValidationError produces expected format" $ do
+                let redirectUri = fromJust $ mkRedirectUri "https://wrong.com/callback"
+                    trace = TraceValidationError (RedirectUriMismatch (fromJust $ mkClientId "client-1") redirectUri)
+                renderOAuthTrace trace `shouldBe` "Validation error: Redirect URI mismatch for client client-1: https://wrong.com/callback"
 
         describe "MCPTrace golden outputs (via renderMCPTrace delegation)" $ do
             it "MCPServer delegates to renderServerTrace" $ do
@@ -225,5 +233,6 @@ spec = do
                 renderMCPTrace trace `shouldBe` "[HTTP] Request received: POST /api/mcp (authenticated)"
 
             it "MCPHttp with nested OAuth delegates correctly" $ do
-                let trace = MCPHttp $ HTTPOAuth $ OAuthClientRegistration{clientId = "client-golden", clientName = "Golden Test"}
-                renderMCPTrace trace `shouldBe` "[HTTP:OAuth] Client registered: client-golden (Golden Test)"
+                let redirectUri = fromJust $ mkRedirectUri "http://localhost/callback"
+                    trace = MCPHttp $ HTTPOAuth $ TraceClientRegistration (fromJust $ mkClientId "client-golden") redirectUri
+                renderMCPTrace trace `shouldBe` "[HTTP:OAuth] Client registered: client-golden (http://localhost/callback)"

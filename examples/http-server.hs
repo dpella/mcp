@@ -47,8 +47,9 @@ import System.IO (hFlush, stdout)
 import MCP.Protocol
 import MCP.Server
 import MCP.Server.Auth
-import MCP.Server.HTTP
+import MCP.Server.HTTP (DemoOAuthBundle (..), HTTPServerConfig (..), mcpAppWithOAuth, mkDemoOAuthBundleFromText, runServerHTTP)
 import MCP.Server.HTTP.AppEnv (AppEnv (..), runAppM)
+import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Trace.Types (MCPTrace (..), isOAuthTrace, renderMCPTrace)
 import MCP.Types
 import Servant.Auth.Server (defaultJWTSettings, generateKey)
@@ -204,37 +205,38 @@ main = do
                 }
 
     let baseUrl = T.pack $ fromMaybe ("http://localhost:" ++ show optPort) optBaseUrl
-        oauthConfig =
+        mcpOAuthConfig =
             if optEnableOAuth
                 then
-                    Just $
-                        defaultDemoOAuthConfig
-                            { oauthProviders =
-                                [ OAuthProvider
-                                    { providerName = "demo"
-                                    , clientId = "demo-client"
-                                    , clientSecret = Just "demo-secret"
-                                    , authorizationEndpoint = baseUrl <> "/authorize"
-                                    , tokenEndpoint = baseUrl <> "/token"
-                                    , userInfoEndpoint = Nothing
-                                    , scopes = ["mcp:read", "mcp:write"]
-                                    , grantTypes = [AuthorizationCode]
-                                    , requiresPKCE = True -- MCP requires PKCE
-                                    , metadataEndpoint = Nothing
-                                    }
-                                ]
-                            , -- Override demo defaults for example
-                              authCodeExpirySeconds = 600 -- 10 minutes
-                            , accessTokenExpirySeconds = 3600 -- 1 hour
-                            , demoUserIdTemplate = Just "demo-user-{clientId}"
-                            , demoEmailDomain = "demo.example.com"
-                            , demoUserName = "Demo User"
-                            , authorizationSuccessTemplate =
-                                Just $
+                    let bundle = case mkDemoOAuthBundleFromText baseUrl of
+                            Just b -> b
+                            Nothing -> Prelude.error $ "Invalid base URL: " ++ T.unpack baseUrl
+                        baseMCPConfig = bundleMCPConfig bundle
+                     in Just $
+                            baseMCPConfig
+                                { oauthProviders =
+                                    [ OAuthProvider
+                                        { providerName = "demo"
+                                        , clientId = "demo-client"
+                                        , clientSecret = Just "demo-secret"
+                                        , authorizationEndpoint = baseUrl <> "/authorize"
+                                        , tokenEndpoint = baseUrl <> "/token"
+                                        , userInfoEndpoint = Nothing
+                                        , scopes = ["mcp:read", "mcp:write"]
+                                        , grantTypes = [OAuthAuthorizationCode]
+                                        , requiresPKCE = True -- MCP requires PKCE
+                                        , metadataEndpoint = Nothing
+                                        }
+                                    ]
+                                , -- Override demo defaults for example
+                                  demoUserIdTemplate = Just "demo-user-{clientId}"
+                                , demoEmailDomain = "demo.example.com"
+                                , demoUserName = "Demo User"
+                                , authorizationSuccessTemplate =
                                     "Demo Authorization Successful!\n\n"
                                         <> "Redirect to: {redirectUri}?code={code}{state}\n\n"
                                         <> "This is a demo server. In production, this would redirect automatically."
-                            }
+                                }
                 else Nothing
 
     let config =
@@ -244,7 +246,7 @@ main = do
                 , httpServerInfo = serverInfo
                 , httpCapabilities = capabilities
                 , httpEnableLogging = optEnableLogging
-                , httpOAuthConfig = oauthConfig
+                , httpMCPOAuthConfig = mcpOAuthConfig
                 , httpJWK = Nothing -- Will be auto-generated
                 , httpProtocolVersion = mcpProtocolVersion -- Current MCP protocol version
                 , httpProtectedResourceMetadata = Nothing -- Will be auto-generated from baseUrl
@@ -312,12 +314,19 @@ main = do
                 stateVar <- newTVarIO $ initialServerState (httpCapabilities config)
 
                 -- Create AppEnv with configured settings (including stateVar)
-                let appEnv =
+                let bundle = case mkDemoOAuthBundleFromText baseUrl of
+                        Just b -> b
+                        Nothing -> Prelude.error $ "Invalid base URL: " ++ T.unpack baseUrl
+                    oauthCfgEnv = bundleEnv bundle -- Use OAuthEnv from bundle
+                    oauthTracer = contramap HTTPOAuth httpTracer -- Route OAuth traces through HTTP tracer
+                    appEnv =
                         AppEnv
                             { envOAuth = oauthEnv
                             , envAuth = authEnv
                             , envConfig = config
                             , envTracer = httpTracer
+                            , envOAuthEnv = oauthCfgEnv
+                            , envOAuthTracer = oauthTracer
                             , envJWT = jwtSettings
                             , envServerState = stateVar
                             , envTimeProvider = Nothing -- Use real IO time

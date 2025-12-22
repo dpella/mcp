@@ -58,10 +58,7 @@ import Data.Maybe (isJust)
 import Test.Hspec (Spec, describe, it, shouldBe, shouldSatisfy)
 import Test.QuickCheck (arbitrary, forAllShrinkShow, ioProperty, property, (===))
 
--- Import orphan Arbitrary instances
-import Generators ()
-
--- Auth backend types and typeclass
+-- Auth backend types and typeclass (also imports orphan Arbitrary instances)
 import Servant.OAuth2.IDP.Auth.Backend (
     AuthBackend (..),
     PlaintextPassword,

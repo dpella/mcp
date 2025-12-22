@@ -19,7 +19,7 @@ import Data.Time.Clock (UTCTime)
 import Data.Time.Format (defaultTimeLocale, parseTimeM)
 
 -- Auth typeclass modules
-import Servant.OAuth2.IDP.Auth.Backend (Salt (..), Username (..), mkHashedPassword, mkPlaintextPassword)
+import Servant.OAuth2.IDP.Auth.Backend (Salt (..), mkHashedPassword, mkPlaintextPassword, mkUsername)
 
 import Test.Hspec
 
@@ -40,7 +40,6 @@ import Laws.OAuthUserTypeSpec qualified as OAuthUserTypeSpec
 -- Existing specs
 import Trace.FilterSpec qualified as FilterSpec
 import Trace.GoldenSpec qualified as GoldenSpec
-import Trace.OAuthSpec qualified as OAuthSpec
 import Trace.RenderSpec qualified as RenderSpec
 
 -- Unit tests
@@ -50,7 +49,11 @@ import MCP.Server.OAuth.TypesSpec qualified as TypesSpec
 import MCP.Server.OAuth.AppSpec qualified as AppSpec
 
 -- HTTP endpoint tests
+import MCP.Server.HTTP.AppEnvSpec qualified as AppEnvSpec
 import MCP.Server.HTTP.McpAuthSpec qualified as McpAuthSpec
+
+-- MCP.Server.Auth tests
+import MCP.Server.AuthSpec qualified as AuthSpec
 
 -- Functional tests
 import Functional.OAuthFlowSpec qualified as OAuthFlowSpec
@@ -61,9 +64,16 @@ import Security.SessionCookieSpec qualified as SessionCookieSpec
 -- Servant OAuth2 IDP tests
 
 import Servant.OAuth2.IDP.APISpec qualified as APISpec
+import Servant.OAuth2.IDP.BrandingSpec qualified as BrandingSpec
+import Servant.OAuth2.IDP.ConfigSpec qualified as ConfigSpec
 import Servant.OAuth2.IDP.CryptoEntropySpec qualified as CryptoEntropySpec
+import Servant.OAuth2.IDP.ErrorsSpec qualified as ErrorsSpec
+import Servant.OAuth2.IDP.Handlers.MetadataSpec qualified as HandlersMetadataSpec
 import Servant.OAuth2.IDP.LucidRenderingSpec qualified as LucidRenderingSpec
+import Servant.OAuth2.IDP.MetadataSpec qualified as MetadataSpec
+import Servant.OAuth2.IDP.PKCESpec qualified as PKCESpec
 import Servant.OAuth2.IDP.TokenRequestSpec qualified as TokenRequestSpec
+import Servant.OAuth2.IDP.TraceSpec qualified as TraceSpec
 import Servant.OAuth2.IDP.TypesSpec qualified as IDPTypesSpec
 
 main :: IO ()
@@ -95,15 +105,20 @@ runTestMWithDemoCreds action = do
     env <- mkTestEnv baseTestTime Map.empty
     runTestM env $ do
         -- Add demo credentials
-        addTestCredential (Username "demo") (mkPlaintextPassword "demo123")
-        addTestCredential (Username "admin") (mkPlaintextPassword "admin456")
+        let demoUser = case mkUsername "demo" of
+                Just u -> u
+                Nothing -> error "Test fixture: invalid username 'demo'"
+        let adminUser = case mkUsername "admin" of
+                Just u -> u
+                Nothing -> error "Test fixture: invalid username 'admin'"
+        addTestCredential demoUser (mkPlaintextPassword "demo123")
+        addTestCredential adminUser (mkPlaintextPassword "admin456")
         action
 
 spec :: Spec
 spec = do
     FilterSpec.spec
     GoldenSpec.spec
-    OAuthSpec.spec
     RenderSpec.spec
 
     -- Unit tests
@@ -113,7 +128,11 @@ spec = do
     AppSpec.spec
 
     -- HTTP endpoint tests
+    AppEnvSpec.spec
     McpAuthSpec.spec
+
+    -- MCP.Server.Auth tests
+    AuthSpec.spec
 
     -- Boundary layer tests (Servant FromHttpApiData/ToHttpApiData)
     BoundarySpec.spec
@@ -130,10 +149,17 @@ spec = do
     -- Servant OAuth2 IDP tests
     describe "Servant.OAuth2.IDP" $ do
         APISpec.spec
+        BrandingSpec.spec
+        ConfigSpec.spec
         TokenRequestSpec.spec
         LucidRenderingSpec.spec
         IDPTypesSpec.spec
         CryptoEntropySpec.spec
+        ErrorsSpec.spec
+        HandlersMetadataSpec.spec
+        MetadataSpec.spec
+        PKCESpec.spec
+        TraceSpec.spec
 
     -- Typeclass law tests (using TestM with controlled time)
     describe "TestM OAuthStateStore" $ do
@@ -149,9 +175,12 @@ spec = do
         AuthBackendAssociatedTypesSpec.spec
         AuthBackendSignatureSpec.spec
         authBackendLaws runTestMWithDemoCreds
+        let demoUser = case mkUsername "demo" of
+                Just u -> u
+                Nothing -> error "Test fixture: invalid username 'demo'"
         authBackendKnownCredentials
             runTestMWithDemoCreds
-            (Username "demo")
+            demoUser
             (mkPlaintextPassword "demo123")
             (mkPlaintextPassword "wrongpassword")
 

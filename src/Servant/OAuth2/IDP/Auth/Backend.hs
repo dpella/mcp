@@ -59,8 +59,9 @@ module Servant.OAuth2.IDP.Auth.Backend (
     AuthBackend (..),
 
     -- * Identity Newtypes
-    Username (..),
+    Username,
     mkUsername,
+    usernameText,
 
     -- * Credential Newtypes (ScrubbedBytes-based)
     PlaintextPassword (..),
@@ -78,10 +79,12 @@ import Data.ByteArray (ScrubbedBytes)
 import Data.ByteArray qualified as BA
 import Data.Kind (Type)
 import Data.Map.Strict (Map)
+import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import GHC.Generics (Generic)
+import Test.QuickCheck (Arbitrary (..), chooseInt, elements, listOf1, suchThat, vectorOf)
 
 -- ============================================================================
 -- Identity Newtypes
@@ -107,6 +110,17 @@ mkUsername :: Text -> Maybe Username
 mkUsername t
     | T.null t = Nothing
     | otherwise = Just (Username t)
+
+{- | Extract the Text from a Username.
+
+@
+case mkUsername "alice" of
+  Just u -> usernameText u  -- "alice"
+  Nothing -> error "empty username"
+@
+-}
+usernameText :: Username -> Text
+usernameText (Username t) = t
 
 -- ============================================================================
 -- Credential Types (using ScrubbedBytes for security)
@@ -426,3 +440,57 @@ class (Monad m) => AuthBackend m where
     @
     -}
     validateCredentials :: Username -> PlaintextPassword -> m (Maybe (AuthBackendUser m))
+
+-- ============================================================================
+-- QuickCheck Arbitrary Instances
+-- ============================================================================
+
+{- |
+These Arbitrary instances live in the type-defining module to:
+
+1. Have access to constructors for generation (required)
+2. Enable QuickCheck as library dependency (dead code elimination removes unused instances)
+3. Allow tests to be library consumers using smart constructors only
+-}
+instance Arbitrary Username where
+    arbitrary = do
+        -- Generate valid usernames (alphanumeric + underscore/dot)
+        let validChars = ['a' .. 'z'] ++ ['A' .. 'Z'] ++ ['0' .. '9'] ++ ['_', '.']
+        len <- chooseInt (1, 20) -- Reasonable username length
+        username <- T.pack <$> vectorOf len (elements validChars)
+        maybe arbitrary pure (mkUsername username) -- Retry if validation fails (shouldn't happen)
+    shrink u = [u' | s <- shrink (T.unpack (usernameText u)), not (null s), Just u' <- [mkUsername (T.pack s)]]
+
+-- PlaintextPassword: generate via mkPlaintextPassword (ScrubbedBytes)
+instance Arbitrary PlaintextPassword where
+    arbitrary = do
+        password <- T.pack <$> listOf1 (elements (['a' .. 'z'] ++ ['A' .. 'Z'] ++ ['0' .. '9'] ++ ['!', '@', '#', '$', '%']))
+        pure $ mkPlaintextPassword password
+    shrink _ = [] -- Don't shrink passwords (sensitive data)
+
+-- HashedPassword: generate via mkHashedPassword
+instance Arbitrary HashedPassword where
+    arbitrary = do
+        salt <- arbitrary
+        mkHashedPassword salt <$> arbitrary
+    shrink _ = [] -- Don't shrink hashes
+
+-- Salt: generate random bytes
+instance Arbitrary Salt where
+    arbitrary = do
+        let saltChars = ['a' .. 'z'] ++ ['A' .. 'Z'] ++ ['0' .. '9']
+        saltText <- T.pack <$> vectorOf 32 (elements saltChars)
+        pure $ Salt (BA.convert (TE.encodeUtf8 saltText))
+    shrink _ = [] -- Don't shrink salts
+
+-- CredentialStore: generate map of usernames to hashed passwords
+instance Arbitrary CredentialStore where
+    arbitrary = do
+        salt <- arbitrary
+        -- Generate 1-5 users
+        users <- listOf1 arbitrary `suchThat` (\xs -> length xs <= 5)
+        passwords <- vectorOf (length users) arbitrary
+        let credentials = zip users passwords
+        let storeCredentials = foldr (\(u, p) m -> Map.insert u (mkHashedPassword salt p) m) Map.empty credentials
+        pure CredentialStore{storeCredentials, storeSalt = salt}
+    shrink _ = [] -- Don't shrink credential stores (complex)

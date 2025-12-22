@@ -20,33 +20,37 @@ import Test.Hspec.Wai (get, liftIO, with)
 
 import Control.Concurrent.STM (newTVarIO)
 import MCP.Server (MCPServer (..), MCPServerM, initialServerState)
-import MCP.Server.Auth (OAuthConfig (..))
-import MCP.Server.HTTP (defaultDemoOAuthConfig, mcpAppWithOAuth)
+import MCP.Server.HTTP (DemoOAuthBundle (..), defaultDemoOAuthBundle, mcpAppWithOAuth)
 import MCP.Server.HTTP.AppEnv (AppEnv (..), HTTPServerConfig (..), runAppM)
 import MCP.Server.OAuth.Test.Fixtures (defaultTestTime, mkTestEnv)
 import Servant.Auth.Server (defaultJWTSettings, generateKey)
+import Servant.OAuth2.IDP.Config (OAuthEnv (..))
 import Servant.OAuth2.IDP.Test.Internal (TestConfig (..), TestCredentials (..), generatePKCE, withRegisteredClient)
 import Servant.OAuth2.IDP.Types (unClientId)
 
 -- | Minimal MCPServer instance for testing (uses default implementations)
 instance MCPServer MCPServerM
 
-{- | Helper to create a test config with custom OAuth config.
+{- | Helper to create a test config with custom requireHTTPS setting.
 
 Creates a TestConfig with a modified OAuth configuration, useful for testing
 specific OAuth settings like requireHTTPS.
 -}
-mkTestConfigWith :: OAuthConfig -> IO (TestConfig m)
-mkTestConfigWith oauthConfig = do
+mkTestConfigWith :: Bool -> IO (TestConfig m)
+mkTestConfigWith requireHTTPS = do
     -- Create fresh time TVar for this test
     timeTVar <- newTVarIO defaultTestTime
 
     -- Create base environment
     baseEnv <- mkTestEnv timeTVar
 
+    -- Get default bundle and update requireHTTPS
+    let bundle = defaultDemoOAuthBundle
+        oauthEnv = (bundleEnv bundle){oauthRequireHTTPS = requireHTTPS}
+
     -- Update the OAuth config in the environment
-    let config = (envConfig baseEnv){httpOAuthConfig = Just oauthConfig}
-        env = baseEnv{envConfig = config}
+    let config = (envConfig baseEnv){httpMCPOAuthConfig = Just (bundleMCPConfig bundle)}
+        env = baseEnv{envConfig = config, envOAuthEnv = oauthEnv}
 
     -- Create fresh server state
     stateVar <- newTVarIO $ initialServerState (httpCapabilities config)
@@ -79,7 +83,7 @@ This is a security feature to prevent session hijacking over unencrypted connect
 spec :: Spec
 spec = describe "Session cookie Secure flag" $ do
     describe "when requireHTTPS is True" $ do
-        config <- runIO $ mkTestConfigWith defaultDemoOAuthConfig{requireHTTPS = True}
+        config <- runIO $ mkTestConfigWith True
         app <- runIO $ fst <$> tcMakeApp config
 
         with (return app) $ do
@@ -117,7 +121,7 @@ spec = describe "Session cookie Secure flag" $ do
                                     liftIO $ cookieText `shouldSatisfy` T.isInfixOf "; Secure"
 
     describe "when requireHTTPS is False" $ do
-        config <- runIO $ mkTestConfigWith defaultDemoOAuthConfig{requireHTTPS = False}
+        config <- runIO $ mkTestConfigWith False
         app <- runIO $ fst <$> tcMakeApp config
 
         with (return app) $ do

@@ -26,9 +26,7 @@ import Test.Hspec (Spec, describe)
 import Test.Hspec.QuickCheck (prop)
 import Test.QuickCheck (Arbitrary, ioProperty, (.&&.), (===))
 
--- Import orphan Arbitrary instances
-import Generators ()
-
+-- OAuth types and instances (also imports orphan Arbitrary instances)
 import Servant.OAuth2.IDP.Auth.Demo (AuthUser)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types (AuthorizationCode (..))

@@ -1,11 +1,13 @@
 <!--
 SYNC IMPACT REPORT
 ===================
-Version: 1.0.0 (initial ratification)
+Version: 1.0.2 (smart constructor hygiene)
 Changes:
 - Initial constitution creation from typed functional design skills
-- 6 core principles distilled from: functional-domain-modeling, haskell-design,
+- 6 core principles distilled from: typed-domain-modeling, haskell-design,
   architecture-patterns, testing-strategies, code-review-standards, error-handling-strategies
+- 1.0.1: Added domain-centric type naming convention (types denote what they ARE, not field names)
+- 1.0.2: Added smart constructor export rule (MUST NOT export type constructors, use pattern synonyms for matching)
 Added sections:
 - Core Principles (6 principles)
 - Development Standards
@@ -46,6 +48,10 @@ implementation complexity determines module quality.
 - Public interfaces MUST be minimal—export only what users need
 - Implementation details MUST be hidden through module exports and opaque types
 - Smart constructors MUST be the only way to create validated domain types
+- Type constructors for smart-constructor types MUST NOT be exported—not even for tests
+  - Export pattern: `module Foo (FooType, mkFooType, unFooType)` — never `FooType(..)`
+  - If pattern matching is needed, export pattern synonyms instead of raw constructors
+  - This allows proving correct construction by construction
 - Common cases MUST be simple; rare cases MAY be harder
 - Complexity MUST be pulled downward into implementations, not pushed to callers
 
@@ -125,6 +131,9 @@ provide a specification that tests verify.
 - Smart constructors: mk prefix (mkEmail, mkUserId)
 - Predicates: is/has prefix
 - Conversions: to/from (emailToText, textToEmail)
+- Type names MUST denote what they ARE (domain concept), not what field they populate:
+  - Good: `TokenValidity`, `ClientName` (describes the concept)
+  - Bad: `ExpiresIn`, `NameField` (mirrors field/wire format names)
 
 ### Error Handling
 
@@ -171,4 +180,4 @@ This constitution supersedes all other coding practices in this project. Amendme
 - MINOR: New principle added or existing principle materially expanded
 - PATCH: Clarifications, wording improvements, non-semantic changes
 
-**Version**: 1.0.0 | **Ratified**: 2025-12-08 | **Last Amended**: 2025-12-08
+**Version**: 1.0.2 | **Ratified**: 2025-12-08 | **Last Amended**: 2025-12-19

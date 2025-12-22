@@ -4,7 +4,7 @@
 {-# OPTIONS_GHC -Wno-redundant-constraints #-}
 
 {- |
-Module      : MCP.Server.OAuth.Test.Internal
+Module      : Servant.OAuth2.IDP.Test.Internal
 Description : Internal test utilities for OAuth testing
 Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
 License     : MIT
@@ -19,7 +19,7 @@ functional tests.
 == Usage
 
 @
-import MCP.Server.OAuth.Test.Internal
+import Servant.OAuth2.IDP.Test.Internal
 
 spec :: Spec
 spec = do
@@ -90,11 +90,11 @@ import Network.Wai.Test (SResponse, simpleBody, simpleHeaders, simpleStatus)
 import Test.Hspec (Spec, describe, expectationFailure, it, runIO, shouldSatisfy)
 import Test.Hspec.Wai (WaiSession, get, liftIO, postHtmlForm, request, shouldRespondWith, with)
 
-import MCP.Server.Time (MonadTime)
+import Control.Monad.Time (MonadTime)
 import Servant.Auth.Server (ToJWT)
 import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..))
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
-import Servant.OAuth2.IDP.Types (AuthCodeId (..), ClientId (..), mkAuthCodeId)
+import Servant.OAuth2.IDP.Types (AuthCodeId, ClientId, mkAuthCodeId, mkClientId, unAuthCodeId, unClientId)
 
 -- -----------------------------------------------------------------------------
 -- Test Configuration Types
@@ -162,9 +162,6 @@ Returns (verifier, challenge) where:
 The generated values satisfy the server's validation rules:
 - Verifier: 43-128 chars, unreserved charset (A-Z, a-z, 0-9, -, ., _, ~)
 - Challenge: 43 chars (SHA256 output), base64url charset (A-Z, a-z, 0-9, -, _)
-
-This implementation matches the production code in MCP.Server.Auth to ensure
-compatibility.
 
 == Example
 
@@ -377,7 +374,7 @@ withRegisteredClient _config action = do
             Object obj ->
                 case KM.lookup "client_id" obj of
                     Just (String clientIdText) ->
-                        Right (ClientId clientIdText)
+                        maybe (Left "Invalid ClientId") Right $ mkClientId clientIdText
                     Just other ->
                         Left $ "client_id was not a string: " <> show other
                     Nothing ->
@@ -642,7 +639,7 @@ Covers:
 == Usage
 
 @
-import MCP.Server.OAuth.Test.Internal (clientRegistrationSpec)
+import Servant.OAuth2.IDP.Test.Internal (clientRegistrationSpec)
 
 spec :: Spec
 spec = do
@@ -722,7 +719,7 @@ Covers:
 == Usage
 
 @
-import MCP.Server.OAuth.Test.Internal (loginFlowSpec)
+import Servant.OAuth2.IDP.Test.Internal (loginFlowSpec)
 
 spec :: Spec
 spec = do
@@ -822,7 +819,7 @@ Covers:
 == Usage
 
 @
-import MCP.Server.OAuth.Test.Internal (tokenExchangeSpec)
+import Servant.OAuth2.IDP.Test.Internal (tokenExchangeSpec)
 
 spec :: Spec
 spec = do
@@ -841,7 +838,7 @@ tokenExchangeSpec config = with (withFreshAppNoTime config) $ do
         it "exchanges valid code for tokens" $ do
             withRegisteredClient config $ \clientId -> do
                 withAuthorizedUser config clientId $ \code verifier -> do
-                    let body = tokenExchangeBody clientId code verifier
+                    let body = tokenExchangeBody (unClientId clientId) (unAuthCodeId code) verifier
                     resp <- request methodPost "/token" [(hContentType, "application/x-www-form-urlencoded")] (LBS.fromStrict body)
                     liftIO $ do
                         simpleStatus resp `shouldSatisfy` (== status200)
@@ -855,12 +852,12 @@ tokenExchangeSpec config = with (withFreshAppNoTime config) $ do
         it "returns 400 for invalid PKCE verifier" $ do
             withRegisteredClient config $ \clientId -> do
                 withAuthorizedUser config clientId $ \code _ -> do
-                    let body = tokenExchangeBody clientId code "wrong_verifier"
+                    let body = tokenExchangeBody (unClientId clientId) (unAuthCodeId code) "wrong_verifier"
                     request methodPost "/token" [(hContentType, "application/x-www-form-urlencoded")] (LBS.fromStrict body) `shouldRespondWith` 400
 
         it "returns 400 for invalid authorization code" $ do
             withRegisteredClient config $ \clientId -> do
-                let body = tokenExchangeBody clientId (AuthCodeId "invalid") "verifier"
+                let body = tokenExchangeBody (unClientId clientId) "invalid" "verifier"
                 request methodPost "/token" [(hContentType, "application/x-www-form-urlencoded")] (LBS.fromStrict body) `shouldRespondWith` 400
 
 {- | Helper to create application/x-www-form-urlencoded token exchange request body.
@@ -885,14 +882,14 @@ let body = tokenExchangeBody clientId code verifier
 post "/token" (LBS.fromStrict body)
 @
 -}
-tokenExchangeBody :: ClientId -> AuthCodeId -> Text -> ByteString
+tokenExchangeBody :: Text -> Text -> Text -> ByteString
 tokenExchangeBody clientId code verifier =
     renderSimpleQuery
         False
         [ ("grant_type", "authorization_code")
-        , ("code", TE.encodeUtf8 $ unAuthCodeId code)
+        , ("code", TE.encodeUtf8 code)
         , ("redirect_uri", "http://localhost/callback")
-        , ("client_id", TE.encodeUtf8 $ unClientId clientId)
+        , ("client_id", TE.encodeUtf8 clientId)
         , ("code_verifier", TE.encodeUtf8 verifier)
         ]
 
@@ -907,7 +904,7 @@ Covers:
 == Usage
 
 @
-import MCP.Server.OAuth.Test.Internal (expirySpec)
+import Servant.OAuth2.IDP.Test.Internal (expirySpec)
 
 spec :: Spec
 spec = do
@@ -937,7 +934,7 @@ expirySpec config = describe "Expiry behavior" $ do
                     withAuthorizedUser config clientId $ \code verifier -> do
                         -- Advance time past the 10-minute authorization code expiry
                         liftIO $ advanceTime (11 * 60) -- 11 minutes = 660 seconds
-                        let body = tokenExchangeBody clientId code verifier
+                        let body = tokenExchangeBody (unClientId clientId) (unAuthCodeId code) verifier
                         request methodPost "/token" [(hContentType, "application/x-www-form-urlencoded")] (LBS.fromStrict body) `shouldRespondWith` 400
 
     describe "with fresh app for expired login session test" $ do
@@ -996,7 +993,7 @@ Covers:
 == Usage
 
 @
-import MCP.Server.OAuth.Test.Internal (headerSpec)
+import Servant.OAuth2.IDP.Test.Internal (headerSpec)
 
 spec :: Spec
 spec = do
@@ -1144,7 +1141,7 @@ OAuth 2.0 compliance including:
 == Usage
 
 @
-import MCP.Server.OAuth.Test.Internal (oauthConformanceSpec)
+import Servant.OAuth2.IDP.Test.Internal (oauthConformanceSpec)
 
 spec :: Spec
 spec = do

@@ -1,5 +1,6 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
 {- |
@@ -17,43 +18,42 @@ module Servant.OAuth2.IDP.Handlers.Token (
     handleToken,
     handleAuthCodeGrant,
     handleRefreshTokenGrant,
+    generateJWTAccessToken,
 ) where
 
 import Control.Monad (unless)
 import Control.Monad.Error.Class (MonadError, throwError)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Reader (MonadReader, asks)
-import Data.Functor.Contravariant (contramap)
+import Data.ByteString.Lazy qualified as LBS
 import Data.Generics.Product (HasType)
 import Data.Generics.Product.Typed (getTyped)
 import Data.Generics.Sum.Typed (AsType, injectTyped)
-import Data.Map.Strict (Map)
-import Data.Map.Strict qualified as Map
 import Data.Set qualified as Set
-import Data.Text (Text)
-import Servant.Auth.Server (JWTSettings, ToJWT)
-import Web.HttpApiData (parseUrlPiece)
-
-import MCP.Server.Auth (
-    OAuthConfig (..),
-    validateCodeVerifier,
- )
-import MCP.Server.HTTP.AppEnv (HTTPServerConfig (..))
-import MCP.Trace.HTTP (HTTPTrace (..))
-import MCP.Trace.OAuth qualified as OAuthTrace
+import Data.Text qualified as T
+import Data.Text.Encoding qualified as TE
 import Plow.Logging (IOTracer, traceWith)
+import Servant.Auth.Server (JWTSettings, ToJWT, makeJWT)
 import Servant.OAuth2.IDP.API (TokenRequest (..), TokenResponse (..))
-import Servant.OAuth2.IDP.Handlers.Helpers (generateJWTAccessToken, generateRefreshTokenWithConfig)
+import Servant.OAuth2.IDP.Config (OAuthEnv (..))
+import Servant.OAuth2.IDP.Errors (
+    AuthorizationError (..),
+    InvalidGrantReason (..),
+    InvalidRequestReason (..),
+    MalformedReason (..),
+ )
+import Servant.OAuth2.IDP.PKCE (validateCodeVerifier)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
+import Servant.OAuth2.IDP.Trace (OAuthTrace (..), OperationResult (..))
 import Servant.OAuth2.IDP.Types (
     AccessToken (..),
-    AccessTokenId (..),
-    AuthCodeId (..),
+    AccessTokenId,
+    AuthCodeId,
     AuthorizationCode (..),
-    AuthorizationError (..),
-    CodeVerifier (..),
+    CodeVerifier,
+    OAuthGrantType (..),
     RefreshToken (..),
-    RefreshTokenId (..),
+    RefreshTokenId,
     ResourceIndicator (..),
     Scopes (..),
     TokenType (..),
@@ -61,12 +61,28 @@ import Servant.OAuth2.IDP.Types (
     authCodeChallenge,
     authScopes,
     authUserId,
-    unAuthCodeId,
-    unCodeChallenge,
-    unCodeVerifier,
+    generateRefreshTokenId,
+    mkAccessTokenId,
+    mkTokenValidity,
+    unAccessTokenId,
     unRefreshTokenId,
-    unResourceIndicator,
  )
+
+{- | Generate JWT access token for user
+
+Uses TypeApplications to specify the monad context (and thus the OAuthUser type).
+Call with: @generateJWTAccessToken \@m user jwtSettings@
+-}
+generateJWTAccessToken :: forall m e. (OAuthStateStore m, ToJWT (OAuthUser m), MonadIO m, MonadError e m, AsType AuthorizationError e) => OAuthUser m -> JWTSettings -> m AccessTokenId
+generateJWTAccessToken user jwtSettings = do
+    accessTokenResult <- liftIO $ makeJWT user jwtSettings Nothing
+    case accessTokenResult of
+        Left err -> throwError $ injectTyped @AuthorizationError $ InvalidRequest $ MalformedRequest $ UnparseableBody $ T.pack $ show err
+        Right accessToken -> case TE.decodeUtf8' $ LBS.toStrict accessToken of
+            Left decodeErr -> throwError $ injectTyped @AuthorizationError $ InvalidRequest $ MalformedRequest $ UnparseableBody $ T.pack $ show decodeErr
+            Right tokenText -> case mkAccessTokenId tokenText of
+                Just tokenId -> return tokenId
+                Nothing -> error "generateJWTAccessToken: JWT generation produced empty text (impossible)"
 
 {- | Token endpoint handler (polymorphic).
 
@@ -79,8 +95,8 @@ This handler is polymorphic over the monad @m@, requiring:
 * 'MonadIO m': Ability to generate JWTs and perform IO
 * 'MonadReader env m': Access to environment containing config, tracer, and JWT settings
 * 'MonadError e m': Error handling via MonadError
-* 'HasType HTTPServerConfig env': Config can be extracted via generic-lens
-* 'HasType (IOTracer HTTPTrace) env': Tracer can be extracted via generic-lens
+* 'HasType OAuthEnv env': Config can be extracted via generic-lens
+* 'HasType (IOTracer OAuthTrace) env': Tracer can be extracted via generic-lens
 * 'HasType JWTSettings env': JWT settings can be extracted via generic-lens
 * 'AsType OAuthStoreError e': Storage errors can be injected into error type
 
@@ -106,29 +122,17 @@ handleToken ::
     , MonadReader env m
     , MonadError e m
     , AsType AuthorizationError e
-    , HasType HTTPServerConfig env
-    , HasType (IOTracer HTTPTrace) env
+    , HasType OAuthEnv env
+    , HasType (IOTracer OAuthTrace) env
     , HasType JWTSettings env
     ) =>
     TokenRequest ->
     m TokenResponse
 handleToken tokenRequest = case tokenRequest of
-    AuthorizationCodeGrant code verifier mResource -> do
-        -- Build param map for existing handler
-        let paramMap =
-                Map.fromList $
-                    [ ("code", unAuthCodeId code)
-                    , ("code_verifier", unCodeVerifier verifier)
-                    ]
-                        ++ maybe [] (\r -> [("resource", unResourceIndicator r)]) mResource
-        handleAuthCodeGrant paramMap
-    RefreshTokenGrant refreshToken mResource -> do
-        -- Build param map for existing handler
-        let paramMap =
-                Map.fromList $
-                    ("refresh_token", unRefreshTokenId refreshToken)
-                        : maybe [] (\r -> [("resource", unResourceIndicator r)]) mResource
-        handleRefreshTokenGrant paramMap
+    AuthorizationCodeGrant code verifier mResource ->
+        handleAuthCodeGrant code verifier mResource
+    RefreshTokenGrant refreshToken mResource ->
+        handleRefreshTokenGrant refreshToken mResource
 
 {- | Authorization code grant handler (polymorphic).
 
@@ -139,7 +143,7 @@ as 'handleToken'.
 
 The handler:
 
-1. Extracts and validates the authorization code
+1. Validates the authorization code
 2. Verifies the code hasn't expired
 3. Validates PKCE code_verifier against stored challenge
 4. Generates JWT access token and refresh token
@@ -150,54 +154,29 @@ The handler:
 
 @
 -- In AppM (with AppEnv)
-response <- handleAuthCodeGrant paramMap
+response <- handleAuthCodeGrant code verifier mResource
 @
 -}
 handleAuthCodeGrant ::
+    forall m env e.
     ( OAuthStateStore m
     , ToJWT (OAuthUser m)
     , MonadIO m
     , MonadReader env m
     , MonadError e m
     , AsType AuthorizationError e
-    , HasType HTTPServerConfig env
-    , HasType (IOTracer HTTPTrace) env
+    , HasType OAuthEnv env
+    , HasType (IOTracer OAuthTrace) env
     , HasType JWTSettings env
     ) =>
-    Map Text Text ->
+    AuthCodeId ->
+    CodeVerifier ->
+    Maybe ResourceIndicator ->
     m TokenResponse
-handleAuthCodeGrant params = do
-    config <- asks (getTyped @HTTPServerConfig)
-    tracer <- asks (getTyped @(IOTracer HTTPTrace))
+handleAuthCodeGrant code codeVerifier _mResource = do
+    config <- asks (getTyped @OAuthEnv)
+    tracer <- asks (getTyped @(IOTracer OAuthTrace))
     jwtSettings <- asks (getTyped @JWTSettings)
-
-    let oauthTracer = contramap HTTPOAuth tracer
-
-    -- Extract and log resource parameter (RFC8707)
-    let mResource = Map.lookup "resource" params
-    liftIO $ traceWith tracer $ HTTPResourceParameterDebug mResource "token request (auth code)"
-
-    -- Parse code from Text to AuthCodeId
-    code <- case Map.lookup "code" params of
-        Nothing -> do
-            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "token_request" "Missing authorization code"
-            throwError $ injectTyped @AuthorizationError $ InvalidRequest "Missing authorization code"
-        Just codeText -> case parseUrlPiece codeText of
-            Left err -> do
-                liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "token_request" ("Invalid authorization code: " <> err)
-                throwError $ injectTyped @AuthorizationError $ InvalidGrant "Invalid authorization code"
-            Right authCodeId -> return authCodeId
-
-    -- Parse code_verifier from Text to CodeVerifier
-    codeVerifier <- case Map.lookup "code_verifier" params of
-        Nothing -> do
-            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "token_request" "Missing code_verifier"
-            throwError $ injectTyped @AuthorizationError $ InvalidRequest "Missing code_verifier"
-        Just verifierText -> case parseUrlPiece verifierText of
-            Left err -> do
-                liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "token_request" ("Invalid code_verifier: " <> err)
-                throwError $ injectTyped @AuthorizationError $ InvalidRequest "Invalid code_verifier"
-            Right verifier -> return verifier
 
     -- Atomically consume authorization code (lookup + delete, prevents replay attacks)
     mAuthCode <- consumeAuthCode code
@@ -205,15 +184,16 @@ handleAuthCodeGrant params = do
         Just ac -> return ac
         Nothing -> do
             -- consumeAuthCode returns Nothing if code doesn't exist, is expired, or already used
-            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenExchange "authorization_code" False
-            throwError $ injectTyped @AuthorizationError $ InvalidGrant "Invalid or expired authorization code"
+            liftIO $ traceWith tracer $ TraceTokenExchange OAuthAuthorizationCode Failure
+            throwError $ injectTyped @AuthorizationError $ InvalidGrant (CodeNotFound code)
 
     -- Verify PKCE
     let authChallenge = authCodeChallenge authCode
         pkceValid = validateCodeVerifier codeVerifier authChallenge
-    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthPKCEValidation (unCodeVerifier codeVerifier) (unCodeChallenge authChallenge) pkceValid
+        pkceResult = if pkceValid then Success else Failure
+    liftIO $ traceWith tracer $ TracePKCEValidation pkceResult
     unless pkceValid $ do
-        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenExchange "authorization_code" False
+        liftIO $ traceWith tracer $ TraceTokenExchange OAuthAuthorizationCode Failure
         throwError $ injectTyped @AuthorizationError PKCEVerificationFailed
 
     -- Extract user directly from auth code (no lookup needed)
@@ -221,23 +201,22 @@ handleAuthCodeGrant params = do
         clientId = authClientId authCode
 
     -- Generate tokens
-    accessTokenText <- generateJWTAccessToken user jwtSettings
-    refreshTokenText <- liftIO $ generateRefreshTokenWithConfig config
-    let refreshToken = RefreshTokenId refreshTokenText
+    accessToken <- generateJWTAccessToken @m user jwtSettings
+    refreshToken <- liftIO $ generateRefreshTokenId (oauthRefreshTokenPrefix config)
 
     -- Store tokens (code already deleted by consumeAuthCode)
-    storeAccessToken (AccessTokenId accessTokenText) user
+    storeAccessToken accessToken user
     storeRefreshToken refreshToken (clientId, user)
 
     -- Emit successful token exchange trace
-    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenExchange "authorization_code" True
+    liftIO $ traceWith tracer $ TraceTokenExchange OAuthAuthorizationCode Success
 
     return
         TokenResponse
-            { access_token = AccessToken accessTokenText
+            { access_token = AccessToken (unAccessTokenId accessToken)
             , token_type = TokenType "Bearer"
-            , expires_in = Just $ maybe 3600 accessTokenExpirySeconds (httpOAuthConfig config)
-            , refresh_token = Just (RefreshToken refreshTokenText)
+            , expires_in = Just $ mkTokenValidity $ oauthAccessTokenExpiry config
+            , refresh_token = Just (RefreshToken (unRefreshTokenId refreshToken))
             , scope = if Set.null (authScopes authCode) then Nothing else Just (Scopes (authScopes authCode))
             }
 
@@ -250,7 +229,7 @@ as 'handleToken'.
 
 The handler:
 
-1. Extracts and validates the refresh token
+1. Validates the refresh token
 2. Looks up the associated user and client
 3. Generates a new JWT access token
 4. Updates the access token mapping
@@ -260,67 +239,52 @@ The handler:
 
 @
 -- In AppM (with AppEnv)
-response <- handleRefreshTokenGrant paramMap
+response <- handleRefreshTokenGrant refreshToken mResource
 @
 -}
 handleRefreshTokenGrant ::
+    forall m env e.
     ( OAuthStateStore m
     , ToJWT (OAuthUser m)
     , MonadIO m
     , MonadReader env m
     , MonadError e m
     , AsType AuthorizationError e
-    , HasType HTTPServerConfig env
-    , HasType (IOTracer HTTPTrace) env
+    , HasType OAuthEnv env
+    , HasType (IOTracer OAuthTrace) env
     , HasType JWTSettings env
     ) =>
-    Map Text Text ->
+    RefreshTokenId ->
+    Maybe ResourceIndicator ->
     m TokenResponse
-handleRefreshTokenGrant params = do
-    config <- asks (getTyped @HTTPServerConfig)
-    tracer <- asks (getTyped @(IOTracer HTTPTrace))
+handleRefreshTokenGrant refreshTokenId _mResource = do
+    config <- asks (getTyped @OAuthEnv)
+    tracer <- asks (getTyped @(IOTracer OAuthTrace))
     jwtSettings <- asks (getTyped @JWTSettings)
-
-    let oauthTracer = contramap HTTPOAuth tracer
-
-    -- Extract and log resource parameter (RFC8707)
-    let mResource = Map.lookup "resource" params
-    liftIO $ traceWith tracer $ HTTPResourceParameterDebug mResource "token request (refresh token)"
-
-    -- Parse refresh_token from Text to RefreshTokenId
-    refreshTokenId <- case Map.lookup "refresh_token" params of
-        Nothing -> do
-            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "token_request" "Missing refresh_token"
-            throwError $ injectTyped @AuthorizationError $ InvalidRequest "Missing refresh_token"
-        Just tokenText -> case parseUrlPiece tokenText of
-            Left err -> do
-                liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "token_request" ("Invalid refresh_token: " <> err)
-                throwError $ injectTyped @AuthorizationError $ InvalidGrant "Invalid refresh_token"
-            Right rtId -> return rtId
 
     -- Look up refresh token
     mTokenInfo <- lookupRefreshToken refreshTokenId
     (clientId, user) <- case mTokenInfo of
         Just info -> return info
         Nothing -> do
-            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenRefresh False
-            throwError $ injectTyped @AuthorizationError $ InvalidGrant "Invalid refresh_token"
+            liftIO $ traceWith tracer $ TraceTokenRefresh Failure
+            throwError $ injectTyped @AuthorizationError $ InvalidGrant (RefreshTokenNotFound refreshTokenId)
 
     -- Generate new JWT access token
-    newAccessTokenText <- generateJWTAccessToken user jwtSettings
+    newAccessToken <- generateJWTAccessToken @m user jwtSettings
 
     -- Update tokens (keep same refresh token, update with new client/user association)
-    storeAccessToken (AccessTokenId newAccessTokenText) user
+    storeAccessToken newAccessToken user
     updateRefreshToken refreshTokenId (clientId, user)
 
     -- Emit successful token refresh trace
-    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenRefresh True
+    liftIO $ traceWith tracer $ TraceTokenRefresh Success
 
     return
         TokenResponse
-            { access_token = AccessToken newAccessTokenText
+            { access_token = AccessToken (unAccessTokenId newAccessToken)
             , token_type = TokenType "Bearer"
-            , expires_in = Just $ maybe 3600 accessTokenExpirySeconds (httpOAuthConfig config)
+            , expires_in = Just $ mkTokenValidity $ oauthAccessTokenExpiry config
             , refresh_token = Just (RefreshToken (unRefreshTokenId refreshTokenId))
             , scope = Nothing
             }

@@ -132,7 +132,7 @@
     - package base
     rules:
 
-    - warn: {lhs: unsafeCoerce, rhs: coerce, name: Avoid unsafeCoerce}
+    - error: {lhs: unsafeCoerce, rhs: coerce, name: Avoid unsafeCoerce}
 
     # Data.Bifoldable
 

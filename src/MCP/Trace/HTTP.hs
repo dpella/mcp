@@ -13,17 +13,39 @@ HTTP transport tracing types for structured logging of HTTP-specific events.
 -}
 module MCP.Trace.HTTP (
     HTTPTrace (..),
+    OAuthBoundaryTrace (..),
     renderHTTPTrace,
 ) where
 
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
-import MCP.Trace.OAuth (OAuthTrace, renderOAuthTrace)
 import MCP.Trace.Operation (OperationTrace, renderOperationTrace)
 import MCP.Trace.Protocol (ProtocolTrace, renderProtocolTrace)
 import MCP.Trace.Server (ServerTrace, renderServerTrace)
-import Servant.OAuth2.IDP.Boundary (OAuthBoundaryTrace (..))
+import Servant.OAuth2.IDP.Errors (
+    AuthorizationError,
+    LoginFlowError,
+    ValidationError,
+ )
+import Servant.OAuth2.IDP.Trace (OAuthTrace, renderOAuthTrace)
+
+{- | Trace events for boundary error translation.
+
+These events are logged for observability but never exposed to clients.
+-}
+data OAuthBoundaryTrace
+    = -- | OAuth state storage error (details hidden from client)
+      BoundaryStoreError Text
+    | -- | Authentication backend error (details hidden from client)
+      BoundaryAuthError Text
+    | -- | Validation error (safe to expose)
+      BoundaryValidationError ValidationError
+    | -- | Authorization error (safe to expose)
+      BoundaryAuthorizationError AuthorizationError
+    | -- | Login flow error (safe to expose, renders as HTML)
+      BoundaryLoginFlowError LoginFlowError
+    deriving (Eq, Show)
 
 {- | HTTP transport-specific events.
 

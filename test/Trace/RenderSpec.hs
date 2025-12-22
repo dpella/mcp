@@ -1,5 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+{- HLINT ignore "Avoid partial function" -}
+
 {- |
 Module      : Trace.RenderSpec
 Description : Tests for trace rendering functions
@@ -11,13 +13,15 @@ Verifies that all trace types can be rendered without runtime errors.
 -}
 module Trace.RenderSpec (spec) where
 
+import Data.Maybe (fromJust)
 import Data.Text qualified as T
 import MCP.Trace.HTTP (HTTPTrace (..), renderHTTPTrace)
-import MCP.Trace.OAuth (OAuthTrace (..))
 import MCP.Trace.Protocol (ProtocolTrace (..), renderProtocolTrace)
 import MCP.Trace.Server (ServerTrace (..), renderServerTrace)
 import MCP.Trace.StdIO (StdIOTrace (..), renderStdIOTrace)
 import MCP.Trace.Types (MCPTrace (..), renderMCPTrace)
+import Servant.OAuth2.IDP.Trace (OAuthTrace (..))
+import Servant.OAuth2.IDP.Types (mkClientId, mkRedirectUri)
 import Test.Hspec
 
 spec :: Spec
@@ -249,7 +253,8 @@ spec = do
                 rendered `shouldSatisfy` T.isInfixOf "req-1"
 
             it "renders HTTPOAuth nested events" $ do
-                let trace = HTTPOAuth (OAuthClientRegistration{clientId = "client-1", clientName = "Test"})
+                let redirectUri = fromJust $ mkRedirectUri "http://localhost/callback"
+                    trace = HTTPOAuth (TraceClientRegistration (fromJust $ mkClientId "client-1") redirectUri)
                     rendered = renderHTTPTrace trace
                 rendered `shouldSatisfy` (not . T.null)
                 rendered `shouldSatisfy` T.isInfixOf "client-1"
@@ -287,7 +292,8 @@ spec = do
                 rendered `shouldSatisfy` T.isInfixOf "/mcp"
 
             it "renders nested OAuth traces via MCPHttp" $ do
-                let trace = MCPHttp $ HTTPOAuth $ OAuthClientRegistration{clientId = "client-1", clientName = "Test"}
+                let redirectUri = fromJust $ mkRedirectUri "http://localhost/callback"
+                    trace = MCPHttp $ HTTPOAuth $ TraceClientRegistration (fromJust $ mkClientId "client-1") redirectUri
                     rendered = renderMCPTrace trace
                 rendered `shouldSatisfy` (not . T.null)
                 rendered `shouldSatisfy` T.isInfixOf "client-1"

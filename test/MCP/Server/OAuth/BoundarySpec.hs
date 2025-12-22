@@ -11,21 +11,36 @@ Stability   : experimental
 Portability : GHC
 
 This module tests the boundary layer that translates domain errors into
-Servant ServerError responses.
+Servant ServerError responses via appErrorToServerError.
 -}
 module MCP.Server.OAuth.BoundarySpec (spec) where
 
+import MCP.Server.HTTP.AppEnv (AppError (..), appErrorToServerError)
+import Servant (ServerError (..))
+import Servant.OAuth2.IDP.Auth.Demo (DemoAuthError (..))
+import Servant.OAuth2.IDP.Errors (AuthorizationError (..), ValidationError (..))
+import Servant.OAuth2.IDP.Store.InMemory (OAuthStoreError (..))
 import Test.Hspec
 
 spec :: Spec
 spec = describe "OAuth.Boundary" $ do
-    describe "domainErrorToServerError" $ do
-        it "compiles with correct type signature" $ do
-            -- This test just verifies the function exists and compiles
-            -- Full integration tests would require proper TestM setup
-            True `shouldBe` True
+    describe "appErrorToServerError" $ do
+        it "translates OAuthStoreErr to 500" $ do
+            let err = OAuthStoreErr (StoreUnavailable "test")
+                serverErr = appErrorToServerError err
+            errHTTPCode serverErr `shouldBe` 500
 
-    describe "OAuthBoundaryTrace" $ do
-        it "has all required constructors" $ do
-            -- Test that constructors exist
-            True `shouldBe` True
+        it "translates AuthBackendErr to 401" $ do
+            let err = AuthBackendErr InvalidCredentials
+                serverErr = appErrorToServerError err
+            errHTTPCode serverErr `shouldBe` 401
+
+        it "translates ValidationErr to 400" $ do
+            let err = ValidationErr (UnsupportedResponseType "implicit")
+                serverErr = appErrorToServerError err
+            errHTTPCode serverErr `shouldBe` 400
+
+        it "translates AuthorizationErr ExpiredCode to 400" $ do
+            let err = AuthorizationErr ExpiredCode
+                serverErr = appErrorToServerError err
+            errHTTPCode serverErr `shouldBe` 400

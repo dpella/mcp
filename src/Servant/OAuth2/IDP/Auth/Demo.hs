@@ -71,6 +71,7 @@ import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.:?), 
 import Data.ByteArray qualified as BA
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
+import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import GHC.Generics (Generic)
 import Servant.Auth.Server (FromJWT, ToJWT)
@@ -78,11 +79,14 @@ import Servant.OAuth2.IDP.Auth.Backend (
     AuthBackend (..),
     CredentialStore (..),
     Salt (..),
-    Username (..),
+    Username,
     mkHashedPassword,
     mkPlaintextPassword,
+    mkUsername,
+    usernameText,
  )
-import Servant.OAuth2.IDP.Types (UserId (..))
+import Servant.OAuth2.IDP.Types (UserId, mkUserId)
+import Test.QuickCheck (Arbitrary (..), Gen, elements, frequency, getNonEmpty, listOf1)
 
 -- -----------------------------------------------------------------------------
 -- User Types
@@ -162,20 +166,20 @@ instance (MonadIO m) => AuthBackend (ReaderT DemoCredentialEnv m) where
         let storedHash = Map.lookup username (storeCredentials store)
         case storedHash of
             Nothing -> pure Nothing -- User not found (same as invalid password)
-            Just hash -> do
+            Just hash ->
                 let candidateHash = mkHashedPassword (storeSalt store) password
-                -- ScrubbedBytes Eq is constant-time
-                if hash == candidateHash
-                    then do
-                        let userId = UserId (unUsername username)
-                        let authUser =
-                                AuthUser
-                                    { userUserId = userId
-                                    , userUserEmail = Just (unUsername username <> "@demo.local")
-                                    , userUserName = Just (unUsername username)
-                                    }
-                        pure $ Just authUser
-                    else pure Nothing
+                 in pure $ case mkUserId (usernameText username) of
+                        Just userId
+                            -- ScrubbedBytes Eq is constant-time
+                            | hash == candidateHash ->
+                                let authUser =
+                                        AuthUser
+                                            { userUserId = userId
+                                            , userUserEmail = Just (usernameText username <> "@demo.local")
+                                            , userUserName = Just (usernameText username)
+                                            }
+                                 in Just authUser
+                        _ -> Nothing
 
 -- -----------------------------------------------------------------------------
 -- Default Credentials
@@ -208,11 +212,43 @@ defaultDemoCredentialStore =
         salt = Salt saltBytes
         demoHash = mkHashedPassword salt (mkPlaintextPassword "demo123")
         adminHash = mkHashedPassword salt (mkPlaintextPassword "admin456")
+        -- These should never fail since the strings are non-empty literals
+        -- Using error is acceptable here since these are compile-time constants
+        demoUser = case mkUsername "demo" of
+            Just u -> u
+            Nothing -> error "BUG: mkUsername failed for non-empty literal 'demo'"
+        adminUser = case mkUsername "admin" of
+            Just u -> u
+            Nothing -> error "BUG: mkUsername failed for non-empty literal 'admin'"
      in CredentialStore
             { storeCredentials =
                 Map.fromList
-                    [ (Username "demo", demoHash)
-                    , (Username "admin", adminHash)
+                    [ (demoUser, demoHash)
+                    , (adminUser, adminHash)
                     ]
             , storeSalt = salt
             }
+
+-- ============================================================================
+-- QuickCheck Arbitrary Instances
+-- ============================================================================
+
+{- |
+These Arbitrary instances live in the type-defining module to:
+
+1. Have access to constructors for generation (required)
+2. Enable QuickCheck as library dependency (dead code elimination removes unused instances)
+3. Allow tests to be library consumers using smart constructors only
+-}
+instance Arbitrary AuthUser where
+    arbitrary = do
+        userUserId <- arbitrary
+        userUserEmail <- frequency [(1, pure Nothing), (3, Just <$> genEmail)]
+        userUserName <- frequency [(1, pure Nothing), (3, Just . T.pack . getNonEmpty <$> arbitrary)]
+        pure AuthUser{..}
+      where
+        genEmail :: Gen Text
+        genEmail = do
+            local <- listOf1 (elements (['a' .. 'z'] ++ ['0' .. '9'] ++ ['.', '_']))
+            domain <- elements ["example.com", "test.org", "mail.io"]
+            pure $ T.pack (local ++ "@" ++ domain)

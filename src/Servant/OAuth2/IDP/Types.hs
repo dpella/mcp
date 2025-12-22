@@ -21,39 +21,59 @@ refactoring.
 -}
 module Servant.OAuth2.IDP.Types (
     -- * Identity Newtypes
-    AuthCodeId (..),
+    AuthCodeId,
     mkAuthCodeId,
-    ClientId (..),
+    generateAuthCodeId,
+    unAuthCodeId,
+    ClientId,
     mkClientId,
-    SessionId (..),
+    generateClientId,
+    unClientId,
+    SessionId,
     mkSessionId,
-    AccessTokenId (..),
-    RefreshTokenId (..),
+    generateSessionId,
+    unSessionId,
+    AccessTokenId,
+    mkAccessTokenId,
+    unAccessTokenId,
+    RefreshTokenId,
     mkRefreshTokenId,
-    UserId (..),
+    generateRefreshTokenId,
+    unRefreshTokenId,
+    UserId,
     mkUserId,
+    unUserId,
 
     -- * Value Newtypes
-    RedirectUri (..),
+    RedirectUri,
     mkRedirectUri,
-    Scope (..),
+    unRedirectUri,
+    Scope,
     mkScope,
+    unScope,
     parseScopes,
     serializeScopeSet,
     Scopes (..),
-    CodeChallenge (..),
+    CodeChallenge,
     mkCodeChallenge,
-    CodeVerifier (..),
+    unCodeChallenge,
+    CodeVerifier,
     mkCodeVerifier,
+    unCodeVerifier,
     OAuthState (..),
     ResourceIndicator (..),
-    ClientSecret (..),
+    ClientSecret,
     mkClientSecret,
-    ClientName (..),
+    unClientSecret,
+    ClientName,
     mkClientName,
+    unClientName,
     AccessToken (..),
     TokenType (..),
     RefreshToken (..),
+    TokenValidity,
+    mkTokenValidity,
+    unTokenValidity,
 
     -- * HTTP Response Newtypes
     RedirectTarget (..),
@@ -64,35 +84,40 @@ module Servant.OAuth2.IDP.Types (
     GrantType (..),
     ResponseType (..),
     ClientAuthMethod (..),
+    OAuthGrantType (..),
+    oauthGrantTypeToGrantType,
+    LoginAction (..),
 
     -- * Domain Entities
     AuthorizationCode (..),
     ClientInfo (..),
     PendingAuthorization (..),
 
-    -- * Error Types
-    AuthorizationError (..),
-    authorizationErrorToResponse,
-    ValidationError (..),
-    validationErrorToResponse,
-    OAuthErrorResponse (..),
+    -- * QuickCheck Helpers (monomorphic, no orphans)
+    arbitraryUTCTime,
+    shrinkUTCTime,
 ) where
 
 import Control.Monad (forM_, guard, when)
+import Crypto.Random (MonadRandom (getRandomBytes))
 import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, withText, (.:), (.:?), (.=))
 import Data.Aeson.Types (Parser)
+import Data.ByteArray.Encoding (Base (..), convertToBase)
+import Data.ByteString (ByteString)
 import Data.Char (isAsciiLower, isAsciiUpper, isDigit, isHexDigit, isSpace)
-import Data.List.NonEmpty (NonEmpty, nonEmpty)
-import Data.Maybe (isNothing)
+import Data.List.NonEmpty (NonEmpty ((:|)), nonEmpty)
+import Data.Maybe (fromJust, isNothing)
 import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Time.Clock (UTCTime)
+import Data.Text.Encoding qualified as TE
+import Data.Time.Calendar (addDays, fromGregorian)
+import Data.Time.Clock (NominalDiffTime, UTCTime (..), secondsToDiffTime)
 import Data.Word (Word8)
 import GHC.Generics (Generic)
-import Network.HTTP.Types.Status (Status, status400, status401, status403)
 import Network.URI (URI, parseURI, uriAuthority, uriRegName, uriScheme, uriToString)
+import Test.QuickCheck (Arbitrary (..), Gen, chooseInt, elements, frequency, getNonEmpty, listOf, listOf1, suchThat, vectorOf)
 import Web.HttpApiData (FromHttpApiData (..), ToHttpApiData (..))
 
 -- -----------------------------------------------------------------------------
@@ -170,10 +195,16 @@ instance FromHttpApiData SessionId where
 instance ToHttpApiData SessionId where
     toUrlPiece = unSessionId
 
--- | Access token identifier (JWT-generated, no smart constructor needed)
+-- | Access token identifier (JWT-generated)
 newtype AccessTokenId = AccessTokenId {unAccessTokenId :: Text}
     deriving stock (Eq, Ord, Show, Generic)
     deriving newtype (FromJSON, ToJSON)
+
+-- | Smart constructor for AccessTokenId
+mkAccessTokenId :: Text -> Maybe AccessTokenId
+mkAccessTokenId t
+    | T.null t = Nothing
+    | otherwise = Just (AccessTokenId t)
 
 instance FromHttpApiData AccessTokenId where
     parseUrlPiece t
@@ -220,6 +251,84 @@ instance FromHttpApiData UserId where
 
 instance ToHttpApiData UserId where
     toUrlPiece = unUserId
+
+-- -----------------------------------------------------------------------------
+-- Crypto-Random ID Generators
+-- -----------------------------------------------------------------------------
+
+{- | Generate a cryptographically secure AuthCodeId with prefix
+Uses 32 bytes (256 bits) of cryptographic randomness, base16-encoded.
+-}
+generateAuthCodeId :: Text -> IO AuthCodeId
+generateAuthCodeId prefix = do
+    randomBytes <- getRandomBytes 32 :: IO ByteString
+    randomHex <- case TE.decodeUtf8' $ convertToBase Base16 randomBytes of
+        Right t -> return t
+        Left err -> error $ "generateAuthCodeId: Base16 encoding produced invalid UTF-8 (impossible): " ++ show err
+    let idText = prefix <> randomHex
+    case mkAuthCodeId idText of
+        Just codeId -> return codeId
+        Nothing -> error "generateAuthCodeId: crypto random generation produced empty text (impossible)"
+
+{- | Generate a cryptographically secure ClientId with prefix
+Uses 32 bytes (256 bits) of cryptographic randomness, base16-encoded.
+-}
+generateClientId :: Text -> IO ClientId
+generateClientId prefix = do
+    randomBytes <- getRandomBytes 32 :: IO ByteString
+    randomHex <- case TE.decodeUtf8' $ convertToBase Base16 randomBytes of
+        Right t -> return t
+        Left err -> error $ "generateClientId: Base16 encoding produced invalid UTF-8 (impossible): " ++ show err
+    let idText = prefix <> randomHex
+    case mkClientId idText of
+        Just clientId -> return clientId
+        Nothing -> error "generateClientId: crypto random generation produced empty text (impossible)"
+
+{- | Generate a cryptographically secure SessionId (UUID format)
+Uses 16 bytes (128 bits) of cryptographic randomness, formatted as UUID v4.
+Format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx where y is [8-9a-b].
+-}
+generateSessionId :: IO SessionId
+generateSessionId = do
+    randomBytes <- getRandomBytes 16 :: IO ByteString
+    hex <- case TE.decodeUtf8' $ convertToBase Base16 randomBytes of
+        Right t -> return t
+        Left err -> error $ "generateSessionId: Base16 encoding produced invalid UTF-8 (impossible): " ++ show err
+    let
+        -- Format as UUID v4: 8-4-4-4-12
+        part1 = T.take 8 hex
+        part2 = T.take 4 $ T.drop 8 hex
+        -- Set version to 4 (UUID v4)
+        part3 = "4" <> T.take 3 (T.drop 13 hex)
+        -- Set variant bits (10xx in binary, so first hex digit is 8-b)
+        variantByte = T.take 1 $ T.drop 16 hex
+        part4Variant = case T.unpack variantByte of
+            [c]
+                | c >= '0' && c <= '3' -> "8"
+                | c >= '4' && c <= '7' -> "9"
+                | c >= '8' && c <= 'b' -> "a"
+                | otherwise -> "b"
+            _ -> "8"
+        part4 = part4Variant <> T.take 3 (T.drop 17 hex)
+        part5 = T.take 12 $ T.drop 20 hex
+        uuidText = T.intercalate "-" [part1, part2, part3, part4, part5]
+    case mkSessionId uuidText of
+        Just sessionId -> return sessionId
+        Nothing -> error "generateSessionId: crypto random UUID generation produced invalid format (impossible)"
+
+{- | Generate a cryptographically secure RefreshTokenId with prefix
+Uses 32 bytes (256 bits) of cryptographic randomness, base16-encoded.
+-}
+generateRefreshTokenId :: Text -> IO RefreshTokenId
+generateRefreshTokenId prefix = do
+    randomBytes <- getRandomBytes 32 :: IO ByteString
+    randomHex <- case TE.decodeUtf8' $ convertToBase Base16 randomBytes of
+        Right t -> return t
+        Left err -> error $ "generateRefreshTokenId: Base16 encoding produced invalid UTF-8 (impossible): " ++ show err
+    let idText = prefix <> randomHex
+    case mkRefreshTokenId idText of
+        Just tokenId -> return tokenId
+        Nothing -> error "generateRefreshTokenId: crypto random generation produced empty text (impossible)"
 
 -- -----------------------------------------------------------------------------
 -- Value Newtypes
@@ -391,9 +500,10 @@ mkRedirectUri t = do
             || hasOctalOctet host
 
     -- Check if any octet in dotted-quad starts with 0 (octal notation)
+    -- Only applies to strings that look like IP addresses (digits and dots only)
     hasOctalOctet :: String -> Bool
     hasOctalOctet host
-        | '.' `elem` host =
+        | '.' `elem` host && all (\c -> isDigit c || c == '.') host =
             let octets = splitOn '.' host
              in any startsWithZero octets
         | otherwise = False
@@ -429,6 +539,16 @@ instance FromHttpApiData Scope where
 
 instance ToHttpApiData Scope where
     toUrlPiece = unScope
+
+-- | QuickCheck Arbitrary instance for Scope (generates valid scope values)
+instance Arbitrary Scope where
+    arbitrary = do
+        -- Generate valid scope values (alphanumeric + colon/dot)
+        let validChars = ['a' .. 'z'] ++ ['A' .. 'Z'] ++ ['0' .. '9'] ++ [':', '.', '-', '_']
+        len <- chooseInt (1, 30)
+        scopeText <- T.pack <$> vectorOf len (elements validChars)
+        maybe arbitrary pure (mkScope scopeText) -- Retry if validation fails
+    shrink scope = [s | str <- shrink (T.unpack (unScope scope)), not (null str), Just s <- [mkScope (T.pack str)]]
 
 {- | Parse space-delimited scope list into Set of Scope values (RFC 6749 Section 3.3).
 Empty string returns empty Set. Invalid scopes cause entire parse to fail.
@@ -472,10 +592,56 @@ instance FromJSON Scopes where
         withText "Scopes" $
             either (fail . T.unpack) pure . parseUrlPiece
 
+-- -----------------------------------------------------------------------------
+-- PKCE Types
+-- -----------------------------------------------------------------------------
+
 -- | PKCE code challenge
 newtype CodeChallenge = CodeChallenge {unCodeChallenge :: Text}
     deriving stock (Eq, Ord, Show, Generic)
     deriving newtype (FromJSON, ToJSON)
+
+instance FromHttpApiData CodeChallenge where
+    parseUrlPiece t
+        | len < 43 || len > 128 = Left "CodeChallenge must be base64url (43-128 chars)"
+        | not (T.all isBase64UrlChar t) = Left "CodeChallenge must be base64url (43-128 chars)"
+        | otherwise = Right (CodeChallenge t)
+      where
+        len = T.length t
+        isBase64UrlChar c =
+            isAsciiUpper c
+                || isAsciiLower c
+                || isDigit c
+                || c == '-'
+                || c == '_'
+
+instance ToHttpApiData CodeChallenge where
+    toUrlPiece = unCodeChallenge
+
+-- | PKCE code verifier
+newtype CodeVerifier = CodeVerifier {unCodeVerifier :: Text}
+    deriving stock (Eq, Ord, Show, Generic)
+    deriving newtype (FromJSON, ToJSON)
+
+instance FromHttpApiData CodeVerifier where
+    parseUrlPiece t
+        | len < 43 || len > 128 = Left "CodeVerifier must contain unreserved chars (43-128 chars)"
+        | not (T.all isUnreservedChar t) = Left "CodeVerifier must contain unreserved chars (43-128 chars)"
+        | otherwise = Right (CodeVerifier t)
+      where
+        len = T.length t
+        -- RFC 7636: unreserved = ALPHA / DIGIT / "-" / "." / "_" / "~"
+        isUnreservedChar c =
+            isAsciiUpper c
+                || isAsciiLower c
+                || isDigit c
+                || c == '-'
+                || c == '.'
+                || c == '_'
+                || c == '~'
+
+instance ToHttpApiData CodeVerifier where
+    toUrlPiece = unCodeVerifier
 
 -- | Smart constructor for CodeChallenge (base64url charset, 43-128 chars)
 mkCodeChallenge :: Text -> Maybe CodeChallenge
@@ -491,19 +657,6 @@ mkCodeChallenge t
             || isDigit c
             || c == '-'
             || c == '_'
-
-instance FromHttpApiData CodeChallenge where
-    parseUrlPiece t = case mkCodeChallenge t of
-        Just cc -> Right cc
-        Nothing -> Left "CodeChallenge must be base64url (43-128 chars)"
-
-instance ToHttpApiData CodeChallenge where
-    toUrlPiece = unCodeChallenge
-
--- | PKCE code verifier
-newtype CodeVerifier = CodeVerifier {unCodeVerifier :: Text}
-    deriving stock (Eq, Ord, Show, Generic)
-    deriving newtype (FromJSON, ToJSON)
 
 -- | Smart constructor for CodeVerifier (unreserved chars per RFC 7636, 43-128 chars)
 mkCodeVerifier :: Text -> Maybe CodeVerifier
@@ -522,14 +675,6 @@ mkCodeVerifier t
             || c == '.'
             || c == '_'
             || c == '~'
-
-instance FromHttpApiData CodeVerifier where
-    parseUrlPiece t = case mkCodeVerifier t of
-        Just cv -> Right cv
-        Nothing -> Left "CodeVerifier must contain unreserved chars (43-128 chars)"
-
-instance ToHttpApiData CodeVerifier where
-    toUrlPiece = unCodeVerifier
 
 -- | OAuth state parameter (CSRF protection token per RFC 6749 Section 10.12)
 newtype OAuthState = OAuthState {unOAuthState :: Text}
@@ -591,6 +736,20 @@ newtype TokenType = TokenType {unTokenType :: Text}
 newtype RefreshToken = RefreshToken {unRefreshToken :: Text}
     deriving stock (Eq, Show, Generic)
     deriving newtype (FromJSON, ToJSON)
+
+{- | Token validity duration (FR-004c)
+Denotes what it IS (token validity duration), not field name
+-}
+newtype TokenValidity = TokenValidity {unTokenValidity :: NominalDiffTime}
+    deriving stock (Eq, Show, Generic)
+
+-- | Smart constructor for TokenValidity
+mkTokenValidity :: NominalDiffTime -> TokenValidity
+mkTokenValidity = TokenValidity
+
+-- Custom ToJSON: outputs integer seconds for OAuth wire format compliance
+instance ToJSON TokenValidity where
+    toJSON (TokenValidity t) = toJSON (floor t :: Int)
 
 -- -----------------------------------------------------------------------------
 -- HTTP Response Newtypes
@@ -724,6 +883,44 @@ instance ToHttpApiData ClientAuthMethod where
     toUrlPiece AuthClientSecretPost = "client_secret_post"
     toUrlPiece AuthClientSecretBasic = "client_secret_basic"
 
+-- | OAuth grant types (MCP-specific subset, rest TBD)
+data OAuthGrantType
+    = -- | Authorization code flow for user-based scenarios
+      OAuthAuthorizationCode
+    | -- | Client credentials flow for application-to-application
+      OAuthClientCredentials
+    deriving stock (Eq, Ord, Show, Generic)
+
+instance FromJSON OAuthGrantType where
+    parseJSON = withText "OAuthGrantType" $ \case
+        "authorization_code" -> pure OAuthAuthorizationCode
+        "client_credentials" -> pure OAuthClientCredentials
+        other -> fail $ "Invalid grant type: " ++ T.unpack other
+
+instance ToJSON OAuthGrantType where
+    toJSON OAuthAuthorizationCode = toJSON ("authorization_code" :: Text)
+    toJSON OAuthClientCredentials = toJSON ("client_credentials" :: Text)
+
+-- | Convert OAuthGrantType to GrantType for metadata endpoints
+oauthGrantTypeToGrantType :: OAuthGrantType -> GrantType
+oauthGrantTypeToGrantType OAuthAuthorizationCode = GrantAuthorizationCode
+oauthGrantTypeToGrantType OAuthClientCredentials = GrantClientCredentials
+
+-- | Login form action (approve or deny authorization)
+data LoginAction
+    = ActionApprove
+    | ActionDeny
+    deriving stock (Eq, Show, Generic)
+
+instance FromHttpApiData LoginAction where
+    parseUrlPiece "approve" = Right ActionApprove
+    parseUrlPiece "deny" = Right ActionDeny
+    parseUrlPiece x = Left ("Invalid action: " <> x)
+
+instance ToHttpApiData LoginAction where
+    toUrlPiece ActionApprove = "approve"
+    toUrlPiece ActionDeny = "deny"
+
 -- -----------------------------------------------------------------------------
 -- Domain Entities
 -- -----------------------------------------------------------------------------
@@ -789,7 +986,7 @@ instance (ToJSON userId) => ToJSON (AuthorizationCode userId) where
 
 -- | Registered OAuth client information
 data ClientInfo = ClientInfo
-    { clientName :: Text
+    { clientName :: ClientName
     , clientRedirectUris :: NonEmpty RedirectUri
     , clientGrantTypes :: Set GrantType
     , clientResponseTypes :: Set ResponseType
@@ -799,7 +996,10 @@ data ClientInfo = ClientInfo
 
 instance FromJSON ClientInfo where
     parseJSON = withObject "ClientInfo" $ \v -> do
-        name <- v .: "client_name"
+        nameText <- v .: "client_name"
+        name <- case mkClientName nameText of
+            Just n -> pure n
+            Nothing -> fail "client_name must not be empty"
 
         uriList <- v .: "client_redirect_uris"
         uris <- case nonEmpty uriList of
@@ -821,7 +1021,7 @@ instance FromJSON ClientInfo where
 instance ToJSON ClientInfo where
     toJSON ClientInfo{..} =
         object
-            [ "client_name" .= clientName
+            [ "client_name" .= unClientName clientName
             , "client_redirect_uris" .= clientRedirectUris
             , "client_grant_types" .= clientGrantTypes
             , "client_response_types" .= clientResponseTypes
@@ -890,109 +1090,227 @@ instance ToJSON PendingAuthorization where
             , "pending_created_at" .= pendingCreatedAt
             ]
 
--- -----------------------------------------------------------------------------
--- Error Types
--- -----------------------------------------------------------------------------
+-- ============================================================================
+-- QuickCheck Arbitrary Instances
+-- ============================================================================
 
--- | OAuth 2.0 error response per RFC 6749 Section 5.2
-data OAuthErrorResponse = OAuthErrorResponse
-    { oauthErrorCode :: Text
-    , oauthErrorDescription :: Maybe Text
-    }
-    deriving stock (Eq, Show, Generic)
+{- |
+These Arbitrary instances live in the type-defining module to:
 
-instance ToJSON OAuthErrorResponse where
-    toJSON OAuthErrorResponse{..} =
-        object $
-            ("error" .= oauthErrorCode)
-                : case oauthErrorDescription of
-                    Just desc -> ["error_description" .= desc]
-                    Nothing -> []
-
-instance FromJSON OAuthErrorResponse where
-    parseJSON = withObject "OAuthErrorResponse" $ \v ->
-        OAuthErrorResponse
-            <$> v .: "error"
-            <*> v .:? "error_description"
-
-{- | OAuth 2.0 authorization errors per RFC 6749 Section 4.1.2.1 and 5.2.
-Fixed type (protocol-defined), NOT an associated type.
-Safe to expose to clients in OAuth error response format.
+1. Have access to constructors for generation (required)
+2. Enable QuickCheck as library dependency (dead code elimination removes unused instances)
+3. Allow tests to be library consumers using smart constructors only
 -}
-data AuthorizationError
-    = -- | 400: Missing/invalid parameter
-      InvalidRequest Text
-    | -- | 401: Client authentication failed
-      InvalidClient Text
-    | -- | 400: Invalid authorization code/refresh token
-      InvalidGrant Text
-    | -- | 401: Client not authorized for grant type
-      UnauthorizedClient Text
-    | -- | 400: Grant type not supported
-      UnsupportedGrantType Text
-    | -- | 400: Invalid/unknown scope
-      InvalidScope Text
-    | -- | 403: Resource owner denied request
-      AccessDenied Text
-    | -- | 400: Authorization code expired
-      ExpiredCode
-    | -- | 400: Redirect URI doesn't match registered
-      InvalidRedirectUri
-    | -- | 400: Code verifier doesn't match challenge
-      PKCEVerificationFailed
-    deriving stock (Eq, Show, Generic)
 
-{- | Map AuthorizationError to HTTP status and OAuth error response.
-Per RFC 6749 Section 4.1.2.1 (authorization endpoint errors) and Section 5.2 (token endpoint errors).
--}
-authorizationErrorToResponse :: AuthorizationError -> (Status, OAuthErrorResponse)
-authorizationErrorToResponse = \case
-    InvalidRequest msg -> (status400, OAuthErrorResponse "invalid_request" (Just msg))
-    InvalidClient msg -> (status401, OAuthErrorResponse "invalid_client" (Just msg))
-    InvalidGrant msg -> (status400, OAuthErrorResponse "invalid_grant" (Just msg))
-    UnauthorizedClient msg -> (status401, OAuthErrorResponse "unauthorized_client" (Just msg))
-    UnsupportedGrantType msg -> (status400, OAuthErrorResponse "unsupported_grant_type" (Just msg))
-    InvalidScope msg -> (status400, OAuthErrorResponse "invalid_scope" (Just msg))
-    AccessDenied msg -> (status403, OAuthErrorResponse "access_denied" (Just msg))
-    ExpiredCode -> (status400, OAuthErrorResponse "invalid_grant" (Just "Authorization code has expired"))
-    InvalidRedirectUri -> (status400, OAuthErrorResponse "invalid_request" (Just "Invalid redirect_uri"))
-    PKCEVerificationFailed -> (status400, OAuthErrorResponse "invalid_grant" (Just "PKCE verification failed"))
+-- NO ORPHANS!!!!!!!!!!!!!!!!!!!!!!!!
+--
+-- ============================================================================
+-- QuickCheck Helper Functions (monomorphic, no orphan instances)
+-- ============================================================================
 
-{- | Semantic validation errors for OAuth handler logic.
-Fixed type (not an associated type) - safe to expose to clients.
-These are validation failures that pass parsing but violate business rules.
+{- | Generate arbitrary UTCTime within reasonable range (monomorphic, no orphan)
+Uses a 10-year range from 2020-01-01 to avoid extreme edge cases.
 -}
-data ValidationError
-    = -- | redirect_uri doesn't match registered client
-      RedirectUriMismatch ClientId RedirectUri
-    | -- | response_type not supported
-      UnsupportedResponseType Text
-    | -- | client_id not found in registry
-      ClientNotRegistered ClientId
-    | -- | required scope not present
-      MissingRequiredScope Scope
-    | -- | state parameter validation failed
-      InvalidStateParameter Text
-    deriving stock (Eq, Show, Generic)
+arbitraryUTCTime :: Gen UTCTime
+arbitraryUTCTime = do
+    days <- chooseInt (0, 365 * 10)
+    secs <- chooseInt (0, 86400)
+    let baseDay = fromGregorian 2020 1 1
+    pure $ UTCTime (addDays (fromIntegral days) baseDay) (secondsToDiffTime (fromIntegral secs))
 
-{- | Map ValidationError to HTTP 400 status with descriptive message.
-All validation errors are semantic failures (not parse errors) and map to 400.
+{- | Shrink UTCTime (monomorphic, no orphan)
+Shrinks by adjusting the day forward/backward by one day.
 -}
-validationErrorToResponse :: ValidationError -> (Status, Text)
-validationErrorToResponse = \case
-    RedirectUriMismatch clientId redirectUri ->
-        ( status400
-        , "redirect_uri does not match registered URIs for client_id: "
-            <> unClientId clientId
-            <> " (provided: "
-            <> toUrlPiece redirectUri
-            <> ")"
-        )
-    UnsupportedResponseType responseType ->
-        (status400, "response_type not supported: " <> responseType)
-    ClientNotRegistered clientId ->
-        (status400, "client_id not registered: " <> unClientId clientId)
-    MissingRequiredScope scope ->
-        (status400, "Missing required scope: " <> unScope scope)
-    InvalidStateParameter stateValue ->
-        (status400, "Invalid state parameter: " <> stateValue)
+shrinkUTCTime :: UTCTime -> [UTCTime]
+shrinkUTCTime (UTCTime day time) =
+    [UTCTime day' time | day' <- take 5 [addDays (-1) day, addDays 1 day]]
+
+-- ============================================================================
+-- Identity Newtypes (non-empty text)
+-- ============================================================================
+
+{- HLINT ignore "Avoid partial function" -}
+instance Arbitrary AuthCodeId where
+    arbitrary = fromJust . mkAuthCodeId . T.pack . getNonEmpty <$> arbitrary
+    shrink ac =
+        [ fromJust (mkAuthCodeId (T.pack s)) -- Known-good: shrink preserves non-empty
+        | s <- shrink (T.unpack (unAuthCodeId ac))
+        , not (null s)
+        ]
+
+instance Arbitrary ClientId where
+    arbitrary = fromJust . mkClientId . T.pack . getNonEmpty <$> arbitrary
+    shrink cid =
+        [ fromJust (mkClientId (T.pack s)) -- Known-good: shrink preserves non-empty
+        | s <- shrink (T.unpack (unClientId cid))
+        , not (null s)
+        ]
+
+-- SessionId requires UUID format: 8-4-4-4-12 hex pattern
+instance Arbitrary SessionId where
+    arbitrary = fromJust . mkSessionId <$> genUUID
+      where
+        genUUID :: Gen Text
+        genUUID = do
+            p1 <- genHex 8
+            p2 <- genHex 4
+            p3 <- genHex 4
+            p4 <- genHex 4
+            p5 <- genHex 12
+            pure $ T.intercalate "-" [p1, p2, p3, p4, p5]
+
+        genHex :: Int -> Gen Text
+        genHex n = T.pack <$> vectorOf n (elements "0123456789abcdef")
+
+    shrink _ = [] -- Don't shrink UUIDs (they must maintain format)
+
+instance Arbitrary UserId where
+    arbitrary = fromJust . mkUserId . T.pack . getNonEmpty <$> arbitrary
+    shrink uid =
+        [ fromJust (mkUserId (T.pack s)) -- Known-good: shrink preserves non-empty
+        | s <- shrink (T.unpack (unUserId uid))
+        , not (null s)
+        ]
+
+instance Arbitrary RefreshTokenId where
+    arbitrary = fromJust . mkRefreshTokenId . T.pack . getNonEmpty <$> arbitrary
+    shrink rt =
+        [ fromJust (mkRefreshTokenId (T.pack s)) -- Known-good: shrink preserves non-empty
+        | s <- shrink (T.unpack (unRefreshTokenId rt))
+        , not (null s)
+        ]
+
+instance Arbitrary AccessTokenId where
+    arbitrary = fromJust . mkAccessTokenId . T.pack . getNonEmpty <$> arbitrary
+    shrink at =
+        [ fromJust (mkAccessTokenId (T.pack s)) -- Known-good: shrink preserves non-empty
+        | s <- shrink (T.unpack (unAccessTokenId at))
+        , not (null s)
+        ]
+
+-- ============================================================================
+-- Value Newtypes
+-- ============================================================================
+
+-- RedirectUri: generate valid URIs (https:// or http://localhost)
+instance Arbitrary RedirectUri where
+    arbitrary = do
+        scheme <- elements ["https", "http"]
+        host <-
+            if scheme == "http"
+                then elements ["localhost", "127.0.0.1"]
+                else genHostname
+        port <- chooseInt (1024, 65535)
+        path <- genPath
+        let uriStr = T.pack $ scheme ++ "://" ++ host ++ ":" ++ show port ++ path
+        maybe arbitrary pure (mkRedirectUri uriStr) -- Retry if URI parsing fails
+      where
+        genHostname :: Gen String
+        genHostname = do
+            subdomain <- listOf1 (elements (['a' .. 'z'] ++ ['0' .. '9']))
+            domain <- elements ["example.com", "test.org", "app.io"]
+            pure $ subdomain ++ "." ++ domain
+
+        genPath :: Gen String
+        genPath = do
+            segments <- listOf (listOf1 (elements (['a' .. 'z'] ++ ['0' .. '9'] ++ ['-', '_'])))
+            pure $ concatMap ("/" ++) segments
+
+    shrink _ = [] -- Don't shrink URIs (complex validation)
+
+-- CodeChallenge: base64url charset, 43-128 chars
+instance Arbitrary CodeChallenge where
+    arbitrary = do
+        len <- chooseInt (43, 128) -- PKCE spec: 43-128 characters
+        let base64urlChars = ['A' .. 'Z'] ++ ['a' .. 'z'] ++ ['0' .. '9'] ++ ['-', '_']
+        challengeText <- T.pack <$> vectorOf len (elements base64urlChars)
+        maybe arbitrary pure (mkCodeChallenge challengeText) -- Retry if validation fails
+    shrink _ = [] -- Don't shrink (must maintain length constraints)
+
+-- CodeVerifier: unreserved chars per RFC 7636, 43-128 chars
+instance Arbitrary CodeVerifier where
+    arbitrary = do
+        len <- chooseInt (43, 128) -- PKCE spec: 43-128 characters
+        -- RFC 7636: unreserved = ALPHA / DIGIT / "-" / "." / "_" / "~"
+        let unreservedChars = ['A' .. 'Z'] ++ ['a' .. 'z'] ++ ['0' .. '9'] ++ ['-', '.', '_', '~']
+        verifierText <- T.pack <$> vectorOf len (elements unreservedChars)
+        maybe arbitrary pure (mkCodeVerifier verifierText) -- Retry if validation fails
+    shrink _ = [] -- Don't shrink (must maintain length constraints)
+
+-- OAuthState: opaque CSRF protection token (any non-empty text)
+instance Arbitrary OAuthState where
+    arbitrary = OAuthState . T.pack . getNonEmpty <$> arbitrary
+    shrink (OAuthState t) = [OAuthState (T.pack s) | s <- shrink (T.unpack t), not (null s)]
+
+-- ResourceIndicator: RFC 8707 resource indicator (any non-empty text, typically a URI)
+instance Arbitrary ResourceIndicator where
+    arbitrary = ResourceIndicator . T.pack . getNonEmpty <$> arbitrary
+    shrink (ResourceIndicator t) = [ResourceIndicator (T.pack s) | s <- shrink (T.unpack t), not (null s)]
+
+-- ============================================================================
+-- ADTs (use arbitraryBoundedEnum)
+-- ============================================================================
+
+instance Arbitrary CodeChallengeMethod where
+    arbitrary = elements [S256, Plain]
+
+instance Arbitrary GrantType where
+    arbitrary = elements [GrantAuthorizationCode, GrantRefreshToken, GrantClientCredentials]
+
+instance Arbitrary ResponseType where
+    arbitrary = elements [ResponseCode, ResponseToken]
+
+instance Arbitrary ClientAuthMethod where
+    arbitrary = elements [AuthNone, AuthClientSecretPost, AuthClientSecretBasic]
+
+-- ============================================================================
+-- Domain Entities
+-- ============================================================================
+
+instance (Arbitrary userId) => Arbitrary (AuthorizationCode userId) where
+    arbitrary = do
+        authCodeId <- arbitrary
+        authClientId <- arbitrary
+        authRedirectUri <- arbitrary
+        authCodeChallenge <- arbitrary
+        authCodeChallengeMethod <- arbitrary
+        -- Scopes: generate 0-5 scopes
+        authScopes <- Set.fromList <$> listOf arbitrary `suchThat` (\xs -> length xs <= 5)
+        authUserId <- arbitrary
+        authExpiry <- arbitraryUTCTime
+        pure AuthorizationCode{..}
+
+instance Arbitrary ClientInfo where
+    arbitrary = do
+        clientNameText <- T.pack . getNonEmpty <$> arbitrary
+        let clientName = case mkClientName clientNameText of
+                Just cn -> cn
+                Nothing -> error "Types.hs: generated invalid ClientName (should never happen)"
+        -- NonEmpty RedirectUris
+        headUri <- arbitrary
+        tailUris <- listOf arbitrary `suchThat` (\xs -> length xs <= 3)
+        let clientRedirectUris = headUri :| tailUris
+        -- Grant types: 1-3 grant types
+        clientGrantTypes <- Set.fromList <$> listOf1 arbitrary `suchThat` (\xs -> length xs <= 3)
+        -- Response types: 1-2 response types
+        clientResponseTypes <- Set.fromList <$> listOf1 arbitrary `suchThat` (\xs -> length xs <= 2)
+        clientAuthMethod <- arbitrary
+        pure ClientInfo{..}
+
+instance Arbitrary PendingAuthorization where
+    arbitrary = do
+        pendingClientId <- arbitrary
+        pendingRedirectUri <- arbitrary
+        pendingCodeChallenge <- arbitrary
+        pendingCodeChallengeMethod <- arbitrary
+        -- Optional scope
+        pendingScope <- frequency [(1, pure Nothing), (3, Just . Set.fromList <$> listOf arbitrary `suchThat` (\xs -> length xs <= 5))]
+        -- Optional state (OAuthState newtype)
+        pendingState <- frequency [(1, pure Nothing), (3, Just . OAuthState . T.pack . getNonEmpty <$> arbitrary)]
+        -- Optional resource URI
+        pendingResource <- frequency [(1, pure Nothing), (2, Just <$> genResourceURI)]
+        pendingCreatedAt <- arbitraryUTCTime
+        pure PendingAuthorization{..}
+      where
+        genResourceURI :: Gen URI
+        genResourceURI = unRedirectUri <$> arbitrary

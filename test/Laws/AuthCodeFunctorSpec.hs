@@ -1,5 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+{- HLINT ignore "Avoid partial function" -}
+
 {- |
 Module      : Laws.AuthCodeFunctorSpec
 Description : Property tests for AuthorizationCode Functor laws
@@ -11,22 +13,22 @@ Portability : GHC
 -}
 module Laws.AuthCodeFunctorSpec (spec) where
 
+import Data.Maybe (fromJust)
 import Data.Set qualified as Set
 import Data.Time.Format (defaultTimeLocale, parseTimeM)
-import Network.URI qualified
 import Test.Hspec
 import Test.Hspec.QuickCheck (prop)
 
-import Generators ()
 import Servant.OAuth2.IDP.Types (
-    AuthCodeId (..),
     AuthorizationCode (..),
-    ClientId (..),
-    CodeChallenge (..),
     CodeChallengeMethod (..),
-    RedirectUri (..),
-    Scope (..),
-    UserId (..),
+    UserId,
+    mkAuthCodeId,
+    mkClientId,
+    mkCodeChallenge,
+    mkRedirectUri,
+    mkScope,
+    mkUserId,
  )
 
 -- | Test that AuthorizationCode is a Functor
@@ -46,7 +48,7 @@ spec = describe "AuthorizationCode Functor" $ do
 
     -- Practical use case: map userId to a different type
     it "can map UserId to String" $ do
-        let authCode = mkTestAuthCode (UserId "user123")
+        let authCode = mkTestAuthCode (fromJust $ mkUserId "user123")
             mapped = fmap (const "mapped") authCode
         authUserId mapped `shouldBe` ("mapped" :: String)
 
@@ -54,19 +56,19 @@ spec = describe "AuthorizationCode Functor" $ do
 mkTestAuthCode :: userId -> AuthorizationCode userId
 mkTestAuthCode userId =
     AuthorizationCode
-        { authCodeId = AuthCodeId "code_test123"
-        , authClientId = ClientId "client_test"
+        { authCodeId = fromJust $ mkAuthCodeId "code_test123"
+        , authClientId = fromJust $ mkClientId "client_test"
         , authRedirectUri = testRedirectUri
-        , authCodeChallenge = CodeChallenge "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+        , authCodeChallenge = case mkCodeChallenge "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM" of
+            Just cc -> cc
+            Nothing -> error "Invalid test CodeChallenge"
         , authCodeChallengeMethod = S256
-        , authScopes = Set.fromList [Scope "read", Scope "write"]
+        , authScopes = Set.fromList [fromJust $ mkScope "read", fromJust $ mkScope "write"]
         , authUserId = userId
         , authExpiry = testTime
         }
   where
-    testRedirectUri = case Network.URI.parseURI "https://example.com/callback" of
-        Just uri -> RedirectUri uri
-        Nothing -> error "Invalid test URI"
+    testRedirectUri = fromJust $ mkRedirectUri "https://example.com/callback"
     testTime = case parseTimeM True defaultTimeLocale "%Y-%m-%d" "2025-01-01" of
         Just t -> t
         Nothing -> error "Invalid test time"

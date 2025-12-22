@@ -77,10 +77,7 @@ import Test.Hspec.QuickCheck (prop)
 import Test.QuickCheck (Arbitrary, (===))
 import Web.HttpApiData (FromHttpApiData (..), ToHttpApiData (..))
 
--- Import orphan Arbitrary instances
-import Generators ()
-
--- OAuth domain types
+-- OAuth domain types (also imports orphan Arbitrary instances)
 import Servant.OAuth2.IDP.Types (
     AccessTokenId,
     AuthCodeId,

@@ -95,16 +95,18 @@ library
         MCP.Server.Auth
         MCP.Server.Time
         Servant.OAuth2.IDP.API
+        Servant.OAuth2.IDP.Config
         Servant.OAuth2.IDP.Types
+        Servant.OAuth2.IDP.Metadata
+        Servant.OAuth2.IDP.PKCE
         Servant.OAuth2.IDP.Store
         Servant.OAuth2.IDP.Store.InMemory
-        Servant.OAuth2.IDP.Boundary
+        Servant.OAuth2.IDP.Errors
+        Servant.OAuth2.IDP.Trace
         Servant.OAuth2.IDP.Server
         Servant.OAuth2.IDP.Handlers
         Servant.OAuth2.IDP.Handlers.HTML
-        Servant.OAuth2.IDP.Handlers.Helpers
         Servant.OAuth2.IDP.Handlers.Metadata
-        Servant.OAuth2.IDP.LoginFlowError
         Servant.OAuth2.IDP.Handlers.Registration
         Servant.OAuth2.IDP.Handlers.Authorization
         Servant.OAuth2.IDP.Handlers.Login
@@ -114,14 +116,13 @@ library
         Servant.OAuth2.IDP.Auth.Demo
         MCP.Trace.Types
         MCP.Trace.HTTP
-        MCP.Trace.OAuth
         MCP.Trace.Operation
         MCP.Trace.Protocol
         MCP.Trace.Server
         MCP.Trace.StdIO
 
     -- Modules included in this library but not exported.
-    -- other-modules:
+    other-modules:
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
@@ -158,7 +159,8 @@ library
         hspec >= 2.10 && < 2.12,
         hspec-wai >= 0.11 && < 0.12,
         lucid >= 2.11 && < 2.12,
-        servant-lucid >= 0.9 && < 0.10
+        servant-lucid >= 0.9 && < 0.10,
+        QuickCheck >= 2.14 && < 2.16
 
     -- Directories containing source files.
     hs-source-dirs:   src
@@ -266,7 +268,6 @@ test-suite mcp-test
 
     -- Modules included in this executable, other than Main.
     other-modules:
-        Generators
         TestMonad
         Laws.AuthCodeFunctorSpec
         Laws.ConsumeAuthCodeSpec
@@ -279,20 +280,29 @@ test-suite mcp-test
         Laws.ErrorBoundarySecuritySpec
         Trace.FilterSpec
         Trace.GoldenSpec
-        Trace.OAuthSpec
         Trace.RenderSpec
         Functional.OAuthFlowSpec
         MCP.Server.OAuth.Test.Fixtures
         MCP.Server.OAuth.TypesSpec
         MCP.Server.OAuth.BoundarySpec
         MCP.Server.OAuth.AppSpec
+        MCP.Server.HTTP.AppEnvSpec
         MCP.Server.HTTP.McpAuthSpec
+        MCP.Server.AuthSpec
         Security.SessionCookieSpec
         Servant.OAuth2.IDP.APISpec
+        Servant.OAuth2.IDP.BrandingSpec
+        Servant.OAuth2.IDP.ConfigSpec
         Servant.OAuth2.IDP.TokenRequestSpec
         Servant.OAuth2.IDP.LucidRenderingSpec
         Servant.OAuth2.IDP.TypesSpec
         Servant.OAuth2.IDP.CryptoEntropySpec
+        Servant.OAuth2.IDP.BearerMethodSpec
+        Servant.OAuth2.IDP.ErrorsSpec
+        Servant.OAuth2.IDP.Handlers.MetadataSpec
+        Servant.OAuth2.IDP.MetadataSpec
+        Servant.OAuth2.IDP.PKCESpec
+        Servant.OAuth2.IDP.TraceSpec
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:

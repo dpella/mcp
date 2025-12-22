@@ -52,10 +52,7 @@ import Test.Hspec (Spec, describe)
 import Test.Hspec.QuickCheck (prop)
 import Test.QuickCheck (Arbitrary, ioProperty, (===))
 
--- Import orphan Arbitrary instances
-import Generators ()
-
--- OAuth domain types and typeclass
+-- OAuth domain types and typeclass (also imports orphan Arbitrary instances)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types (
     AccessTokenId,

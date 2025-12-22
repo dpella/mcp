@@ -59,23 +59,22 @@ module Servant.OAuth2.IDP.Store.InMemory (
 import Control.Concurrent.STM (TVar, atomically, newTVarIO, readTVar, writeTVar)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Reader (ReaderT, ask)
+import Control.Monad.Time (MonadTime (..))
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import Data.Time.Clock (NominalDiffTime, addUTCTime)
-import MCP.Server.Time (MonadTime (..))
 import Servant.OAuth2.IDP.Auth.Demo (AuthUser)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types (
+    AccessTokenId,
+    AuthCodeId,
     AuthorizationCode (..),
     ClientId,
     ClientInfo,
     PendingAuthorization (..),
-    unAccessTokenId,
-    unAuthCodeId,
-    unClientId,
-    unRefreshTokenId,
-    unSessionId,
+    RefreshTokenId,
+    SessionId,
  )
 
 -- -----------------------------------------------------------------------------
@@ -108,16 +107,16 @@ defaultExpiryConfig =
 
 -- | OAuth server state stored in memory using maps
 data OAuthState = OAuthState
-    { authCodes :: Map Text (AuthorizationCode AuthUser)
-    -- ^ Authorization codes keyed by unAuthCodeId (stores full user)
-    , accessTokens :: Map Text AuthUser
-    -- ^ Access tokens keyed by unAccessTokenId
-    , refreshTokens :: Map Text (ClientId, AuthUser)
-    -- ^ Refresh tokens keyed by unRefreshTokenId
-    , registeredClients :: Map Text ClientInfo
-    -- ^ Registered clients keyed by unClientId
-    , pendingAuthorizations :: Map Text PendingAuthorization
-    -- ^ Pending authorizations keyed by unSessionId
+    { authCodes :: Map AuthCodeId (AuthorizationCode AuthUser)
+    -- ^ Authorization codes keyed by AuthCodeId (stores full user)
+    , accessTokens :: Map AccessTokenId AuthUser
+    -- ^ Access tokens keyed by AccessTokenId
+    , refreshTokens :: Map RefreshTokenId (ClientId, AuthUser)
+    -- ^ Refresh tokens keyed by RefreshTokenId
+    , registeredClients :: Map ClientId ClientInfo
+    -- ^ Registered clients keyed by ClientId
+    , pendingAuthorizations :: Map SessionId PendingAuthorization
+    -- ^ Pending authorizations keyed by SessionId
     }
 
 -- | Create empty OAuth state
@@ -168,7 +167,7 @@ instance (MonadIO m, MonadTime m) => OAuthStateStore (ReaderT OAuthTVarEnv m) wh
         env <- ask
         liftIO . atomically $ do
             state <- readTVar (oauthStateVar env)
-            let key = unAuthCodeId (authCodeId code)
+            let key = authCodeId code
             let newState = state{authCodes = Map.insert key code (authCodes state)}
             writeTVar (oauthStateVar env) newState
 
@@ -177,8 +176,7 @@ instance (MonadIO m, MonadTime m) => OAuthStateStore (ReaderT OAuthTVarEnv m) wh
         now <- currentTime
         liftIO . atomically $ do
             state <- readTVar (oauthStateVar env)
-            let key = unAuthCodeId codeId
-            case Map.lookup key (authCodes state) of
+            case Map.lookup codeId (authCodes state) of
                 Nothing -> pure Nothing
                 Just code
                     -- Check if expired
@@ -189,8 +187,7 @@ instance (MonadIO m, MonadTime m) => OAuthStateStore (ReaderT OAuthTVarEnv m) wh
         env <- ask
         liftIO . atomically $ do
             state <- readTVar (oauthStateVar env)
-            let key = unAuthCodeId codeId
-            let newState = state{authCodes = Map.delete key (authCodes state)}
+            let newState = state{authCodes = Map.delete codeId (authCodes state)}
             writeTVar (oauthStateVar env) newState
 
     consumeAuthCode codeId = do
@@ -198,15 +195,14 @@ instance (MonadIO m, MonadTime m) => OAuthStateStore (ReaderT OAuthTVarEnv m) wh
         now <- currentTime
         liftIO . atomically $ do
             state <- readTVar (oauthStateVar env)
-            let key = unAuthCodeId codeId
-            case Map.lookup key (authCodes state) of
+            case Map.lookup codeId (authCodes state) of
                 Nothing -> pure Nothing
                 Just code
                     -- Check if expired
                     | now >= authExpiry code -> pure Nothing
                     | otherwise -> do
                         -- Delete the code atomically within the same transaction
-                        let newState = state{authCodes = Map.delete key (authCodes state)}
+                        let newState = state{authCodes = Map.delete codeId (authCodes state)}
                         writeTVar (oauthStateVar env) newState
                         pure (Just code)
 
@@ -216,16 +212,14 @@ instance (MonadIO m, MonadTime m) => OAuthStateStore (ReaderT OAuthTVarEnv m) wh
         env <- ask
         liftIO . atomically $ do
             state <- readTVar (oauthStateVar env)
-            let key = unAccessTokenId tokenId
-            let newState = state{accessTokens = Map.insert key user (accessTokens state)}
+            let newState = state{accessTokens = Map.insert tokenId user (accessTokens state)}
             writeTVar (oauthStateVar env) newState
 
     lookupAccessToken tokenId = do
         env <- ask
         liftIO . atomically $ do
             state <- readTVar (oauthStateVar env)
-            let key = unAccessTokenId tokenId
-            pure $ Map.lookup key (accessTokens state)
+            pure $ Map.lookup tokenId (accessTokens state)
 
     -- Refresh Token Operations
 
@@ -233,23 +227,20 @@ instance (MonadIO m, MonadTime m) => OAuthStateStore (ReaderT OAuthTVarEnv m) wh
         env <- ask
         liftIO . atomically $ do
             state <- readTVar (oauthStateVar env)
-            let key = unRefreshTokenId tokenId
-            let newState = state{refreshTokens = Map.insert key pair (refreshTokens state)}
+            let newState = state{refreshTokens = Map.insert tokenId pair (refreshTokens state)}
             writeTVar (oauthStateVar env) newState
 
     lookupRefreshToken tokenId = do
         env <- ask
         liftIO . atomically $ do
             state <- readTVar (oauthStateVar env)
-            let key = unRefreshTokenId tokenId
-            pure $ Map.lookup key (refreshTokens state)
+            pure $ Map.lookup tokenId (refreshTokens state)
 
     updateRefreshToken tokenId pair = do
         env <- ask
         liftIO . atomically $ do
             state <- readTVar (oauthStateVar env)
-            let key = unRefreshTokenId tokenId
-            let newState = state{refreshTokens = Map.insert key pair (refreshTokens state)}
+            let newState = state{refreshTokens = Map.insert tokenId pair (refreshTokens state)}
             writeTVar (oauthStateVar env) newState
 
     -- Client Registration Operations
@@ -258,16 +249,14 @@ instance (MonadIO m, MonadTime m) => OAuthStateStore (ReaderT OAuthTVarEnv m) wh
         env <- ask
         liftIO . atomically $ do
             state <- readTVar (oauthStateVar env)
-            let key = unClientId clientId
-            let newState = state{registeredClients = Map.insert key info (registeredClients state)}
+            let newState = state{registeredClients = Map.insert clientId info (registeredClients state)}
             writeTVar (oauthStateVar env) newState
 
     lookupClient clientId = do
         env <- ask
         liftIO . atomically $ do
             state <- readTVar (oauthStateVar env)
-            let key = unClientId clientId
-            pure $ Map.lookup key (registeredClients state)
+            pure $ Map.lookup clientId (registeredClients state)
 
     -- Pending Authorization Operations
 
@@ -275,8 +264,7 @@ instance (MonadIO m, MonadTime m) => OAuthStateStore (ReaderT OAuthTVarEnv m) wh
         env <- ask
         liftIO . atomically $ do
             state <- readTVar (oauthStateVar env)
-            let key = unSessionId sessionId
-            let newState = state{pendingAuthorizations = Map.insert key auth (pendingAuthorizations state)}
+            let newState = state{pendingAuthorizations = Map.insert sessionId auth (pendingAuthorizations state)}
             writeTVar (oauthStateVar env) newState
 
     lookupPendingAuth sessionId = do
@@ -285,8 +273,7 @@ instance (MonadIO m, MonadTime m) => OAuthStateStore (ReaderT OAuthTVarEnv m) wh
         let config = oauthExpiryConfig env
         liftIO . atomically $ do
             state <- readTVar (oauthStateVar env)
-            let key = unSessionId sessionId
-            case Map.lookup key (pendingAuthorizations state) of
+            case Map.lookup sessionId (pendingAuthorizations state) of
                 Nothing -> pure Nothing
                 Just auth ->
                     -- Check if session has expired
@@ -299,6 +286,5 @@ instance (MonadIO m, MonadTime m) => OAuthStateStore (ReaderT OAuthTVarEnv m) wh
         env <- ask
         liftIO . atomically $ do
             state <- readTVar (oauthStateVar env)
-            let key = unSessionId sessionId
-            let newState = state{pendingAuthorizations = Map.delete key (pendingAuthorizations state)}
+            let newState = state{pendingAuthorizations = Map.delete sessionId (pendingAuthorizations state)}
             writeTVar (oauthStateVar env) newState

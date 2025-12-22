@@ -101,9 +101,10 @@ main = do
         , httpServerInfo = serverInfo
         , httpCapabilities = capabilities
         , httpEnableLogging = False
-        , httpOAuthConfig = Nothing  -- No OAuth
+        , httpMCPOAuthConfig = Nothing  -- No OAuth
         , httpJWK = Nothing  -- Auto-generated
         , httpProtocolVersion = "2025-06-18"  -- MCP protocol version
+        , httpProtectedResourceMetadata = Nothing
         }
   runServerHTTP config
 ```
@@ -247,10 +248,14 @@ runHTTP :: IO ()
 runHTTP = do
   let config = HTTPServerConfig
         { httpPort = 8080
+        , httpBaseUrl = "http://localhost:8080"
         , httpServerInfo = Implementation "my-server" "1.0.0"
         , httpCapabilities = serverCapabilities
         , httpEnableLogging = False
-        , httpOAuthConfig = Nothing  -- or Just oauthConfig for OAuth
+        , httpMCPOAuthConfig = Nothing  -- or Just mcpOAuthConfig for OAuth
+        , httpJWK = Nothing
+        , httpProtocolVersion = "2025-06-18"
+        , httpProtectedResourceMetadata = Nothing
         }
   runServerHTTP config
 ```
@@ -310,15 +315,32 @@ src/
 │   ├── Types.hs          # Core MCP data types
 │   ├── Protocol.hs       # JSON-RPC protocol messages
 │   ├── Server.hs         # Core server infrastructure
-│   └── Server/
-│       ├── StdIO.hs      # StdIO transport implementation
-│       └── HTTP.hs       # HTTP transport implementation
+│   ├── Server/
+│   │   ├── StdIO.hs      # StdIO transport implementation
+│   │   ├── HTTP.hs       # HTTP transport implementation
+│   │   ├── HTTP/
+│   │   │   └── AppEnv.hs # Composite environment and error types
+│   │   └── Auth.hs       # MCP-specific OAuth configuration
+│   └── Trace/
+│       └── HTTP.hs       # HTTP tracing types
+├── Servant/
+│   └── OAuth2/
+│       └── IDP/          # Reusable OAuth 2.1 library (MCP-independent)
+│           ├── Types.hs      # Core domain newtypes
+│           ├── Config.hs     # OAuthEnv configuration
+│           ├── Errors.hs     # Error types and conversions
+│           ├── PKCE.hs       # RFC 7636 PKCE implementation
+│           ├── Metadata.hs   # RFC 8414/9728 metadata types
+│           ├── Store.hs      # OAuthStateStore typeclass
+│           ├── Trace.hs      # OAuthTrace ADT
+│           ├── Server.hs     # OAuth API composition
+│           └── Handlers/     # OAuth endpoint handlers
 
 app/
 └── Main.hs               # Example MCP server (StdIO mode)
 
-test/
-└── Main.hs               # Test suite (placeholder)
+examples/
+└── http-server.hs        # HTTP server example with OAuth
 ```
 
 ## Development

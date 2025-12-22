@@ -70,9 +70,9 @@ import Servant (
 import Servant.HTML.Lucid (HTML)
 import Web.FormUrlEncoded (FromForm (..), parseUnique)
 
-import MCP.Server.Auth (OAuthMetadata, ProtectedResourceMetadata)
 import Servant.OAuth2.IDP.Auth.Backend (PlaintextPassword, Username, mkPlaintextPassword, mkUsername)
 import Servant.OAuth2.IDP.Handlers.HTML (LoginPage)
+import Servant.OAuth2.IDP.Metadata (OAuthMetadata, ProtectedResourceMetadata)
 import Servant.OAuth2.IDP.Types (
     AccessToken,
     AuthCodeId,
@@ -84,6 +84,7 @@ import Servant.OAuth2.IDP.Types (
     CodeChallengeMethod,
     CodeVerifier,
     GrantType (..),
+    LoginAction (..),
     OAuthState,
     RedirectTarget,
     RedirectUri,
@@ -95,6 +96,7 @@ import Servant.OAuth2.IDP.Types (
     SessionCookie,
     SessionId,
     TokenType,
+    TokenValidity,
     mkSessionId,
  )
 import Web.HttpApiData (parseUrlPiece)
@@ -154,7 +156,7 @@ type LoginAPI =
 
 {- | Complete OAuth 2.1 API.
 
-Provides all OAuth endpoints required by the MCP OAuth specification:
+Provides all OAuth endpoints required by the OAuth specification:
 
 * @/.well-known/oauth-protected-resource@: Protected resource metadata (RFC 9728)
 * @/.well-known/oauth-authorization-server@: Authorization server metadata (RFC 8414)
@@ -163,7 +165,7 @@ Provides all OAuth endpoints required by the MCP OAuth specification:
 * @/login@: Login form submission endpoint (custom)
 * @/token@: Token exchange endpoint (RFC 6749)
 
-All endpoints follow their respective RFCs and the MCP OAuth specification.
+All endpoints follow their respective RFCs.
 
 = API Composition
 
@@ -219,7 +221,7 @@ data LoginForm = LoginForm
     { formUsername :: Username
     , formPassword :: PlaintextPassword
     , formSessionId :: SessionId
-    , formAction :: Text -- "login" or "deny"
+    , formAction :: LoginAction
     }
     deriving (Generic, Show)
 
@@ -277,8 +279,7 @@ Contains access token, optional refresh token, and metadata.
 data TokenResponse = TokenResponse
     { access_token :: AccessToken
     , token_type :: TokenType
-    , -- FIXME; Use NominalDiffTime instead of Int
-      expires_in :: Maybe Int
+    , expires_in :: Maybe TokenValidity
     , refresh_token :: Maybe RefreshToken
     , scope :: Maybe Scopes
     }

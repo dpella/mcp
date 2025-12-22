@@ -40,10 +40,10 @@ module MCP.Trace.Types (
 
 import Data.Text (Text)
 import MCP.Trace.HTTP (HTTPTrace (..), renderHTTPTrace)
-import MCP.Trace.OAuth (OAuthTrace (..), renderOAuthTrace)
 import MCP.Trace.Protocol (ProtocolTrace (..), renderProtocolTrace)
 import MCP.Trace.Server (ServerTrace (..), renderServerTrace)
 import MCP.Trace.StdIO (StdIOTrace (..), renderStdIOTrace)
+import Servant.OAuth2.IDP.Trace (OAuthTrace (..), renderOAuthTrace)
 
 {- | Root trace type for the MCP library.
 
@@ -116,6 +116,6 @@ isErrorTrace (MCPProtocol (ProtocolMethodNotFound{})) = True
 isErrorTrace (MCPProtocol (ProtocolInvalidParams{})) = True
 isErrorTrace (MCPStdIO (StdIOReadError{})) = True
 isErrorTrace (MCPHttp (HTTPAuthFailure{})) = True
-isErrorTrace (MCPHttp (HTTPOAuth (OAuthAuthorizationDenied{}))) = True
-isErrorTrace (MCPHttp (HTTPOAuth (OAuthValidationError{}))) = True
+isErrorTrace (MCPHttp (HTTPOAuth (TraceAuthorizationDenied{}))) = True
+isErrorTrace (MCPHttp (HTTPOAuth (TraceValidationError{}))) = True
 isErrorTrace _ = False

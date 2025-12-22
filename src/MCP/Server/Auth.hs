@@ -2,7 +2,6 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
 
 {- |
 Module      : MCP.Server.Auth
@@ -26,9 +25,10 @@ module MCP.Server.Auth (
     module Servant.OAuth2.IDP.Auth.Backend,
 
     -- * OAuth Configuration
-    OAuthConfig (..),
     OAuthProvider (..),
     OAuthGrantType (..),
+    MCPOAuthConfig (..),
+    defaultDemoMCPOAuthConfig,
 
     -- * Token Validation
     TokenInfo (..),
@@ -40,22 +40,22 @@ module MCP.Server.Auth (
     generateCodeChallenge,
     validateCodeVerifier,
 
-    -- * Metadata Discovery
-    OAuthMetadata (..),
+    -- * Metadata Discovery (re-exported from Servant.OAuth2.IDP.Metadata)
+    module Servant.OAuth2.IDP.Metadata,
 
-    -- * Protected Resource Metadata (RFC 9728)
-    ProtectedResourceMetadata (..),
+    -- * Protected Resource Metadata (RFC 9728) (re-exported)
     ProtectedResourceAuth,
     ProtectedResourceAuthConfig (..),
 ) where
 
 -- Re-exports
 import Servant.OAuth2.IDP.Auth.Backend
+import Servant.OAuth2.IDP.Metadata
 
 import Crypto.Hash (hashWith)
 import Crypto.Hash.Algorithms (SHA256 (..))
 import Crypto.Random (getRandomBytes)
-import Data.Aeson (FromJSON, ToJSON)
+import Data.Aeson (FromJSON)
 import Data.Aeson qualified as Aeson
 import Data.ByteArray (convert)
 import Data.ByteString (ByteString)
@@ -66,20 +66,12 @@ import Data.Text.Encoding qualified as TE
 import GHC.Generics (Generic)
 
 import Servant.OAuth2.IDP.Types (
-    ClientAuthMethod (..),
-    CodeChallenge (..),
-    CodeChallengeMethod (..),
-    CodeVerifier (..),
-    GrantType (..),
-    ResponseType (..),
-    Scope (..),
+    CodeChallenge,
+    CodeVerifier,
+    OAuthGrantType (..),
+    unCodeChallenge,
+    unCodeVerifier,
  )
-
--- | OAuth grant types supported by MCP
-data OAuthGrantType
-    = AuthorizationCode -- For user-based scenarios
-    | ClientCredentials -- For application-to-application
-    deriving (Show, Eq, Generic)
 
 -- | OAuth provider configuration (MCP-compliant)
 data OAuthProvider = OAuthProvider
@@ -94,41 +86,39 @@ data OAuthProvider = OAuthProvider
     , requiresPKCE :: Bool -- MCP requires PKCE for all clients
     , metadataEndpoint :: Maybe Text -- For OAuth metadata discovery
     }
-    deriving (Show, Generic)
+    deriving (Show, Eq, Generic)
 
--- | OAuth configuration for the MCP server
-data OAuthConfig = OAuthConfig
-    { oauthEnabled :: Bool
+-- | MCP-specific OAuth configuration (demo-specific fields)
+data MCPOAuthConfig = MCPOAuthConfig
+    { autoApproveAuth :: Bool
+    -- ^ Demo mode auto-approval flag (bypasses interactive login)
     , oauthProviders :: [OAuthProvider]
-    , requireHTTPS :: Bool -- MCP requires HTTPS for OAuth
-    -- Configurable timing parameters
-    , authCodeExpirySeconds :: Int
-    , accessTokenExpirySeconds :: Int
-    , -- Configurable OAuth parameters
-      supportedScopes :: [Scope]
-    , supportedResponseTypes :: [ResponseType]
-    , supportedGrantTypes :: [GrantType]
-    , supportedAuthMethods :: [ClientAuthMethod]
-    , supportedCodeChallengeMethods :: [CodeChallengeMethod]
-    , -- Demo mode settings
-      autoApproveAuth :: Bool
-    , demoUserIdTemplate :: Maybe Text -- Nothing means no demo mode
+    -- ^ External OAuth identity providers for federated login
+    , demoUserIdTemplate :: Maybe Text
+    -- ^ Template for generating demo user IDs (e.g., "user-{id}"). Nothing means no demo mode.
     , demoEmailDomain :: Text
+    -- ^ Domain suffix for demo user emails (e.g., "example.com")
     , demoUserName :: Text
+    -- ^ Display name for demo users
     , publicClientSecret :: Maybe Text
-    , -- Token prefixes
-      authCodePrefix :: Text
-    , refreshTokenPrefix :: Text
-    , clientIdPrefix :: Text
-    , -- Response templates
-      authorizationSuccessTemplate :: Maybe Text
-    , -- Credential management
-      credentialStore :: CredentialStore
-    , loginSessionExpirySeconds :: Int
+    -- ^ Secret returned for public clients (typically empty or Nothing)
+    , authorizationSuccessTemplate :: Text
+    -- ^ HTML template for authorization success page
     }
-    deriving (Generic)
+    deriving (Show, Eq, Generic)
 
--- Note: No Show instance because CredentialStore contains ScrubbedBytes (no Show)
+-- | Default demo configuration for MCPOAuthConfig
+defaultDemoMCPOAuthConfig :: MCPOAuthConfig
+defaultDemoMCPOAuthConfig =
+    MCPOAuthConfig
+        { autoApproveAuth = False -- Interactive login by default
+        , oauthProviders = []
+        , demoUserIdTemplate = Just "user-{id}"
+        , demoEmailDomain = "example.com"
+        , demoUserName = "Demo User"
+        , publicClientSecret = Nothing
+        , authorizationSuccessTemplate = "<html><body><h1>Authorization Successful</h1></body></html>"
+        }
 
 -- | PKCE challenge data
 data PKCEChallenge = PKCEChallenge
@@ -137,103 +127,6 @@ data PKCEChallenge = PKCEChallenge
     , challengeMethod :: Text -- Always "S256" for MCP
     }
     deriving (Show, Generic)
-
--- | OAuth metadata (from discovery endpoint)
-data OAuthMetadata = OAuthMetadata
-    { issuer :: Text
-    , authorizationEndpoint :: Text
-    , tokenEndpoint :: Text
-    , registrationEndpoint :: Maybe Text
-    , userInfoEndpoint :: Maybe Text
-    , jwksUri :: Maybe Text
-    , scopesSupported :: Maybe [Scope]
-    , responseTypesSupported :: [ResponseType]
-    , grantTypesSupported :: Maybe [GrantType]
-    , tokenEndpointAuthMethodsSupported :: Maybe [ClientAuthMethod]
-    , codeChallengeMethodsSupported :: Maybe [CodeChallengeMethod]
-    }
-    deriving (Show, Generic)
-
--- | Protected Resource Metadata (RFC 9728)
-data ProtectedResourceMetadata = ProtectedResourceMetadata
-    { resource :: Text
-    {- ^ The protected resource's identifier (MCP server URL)
-    Required. MUST be an absolute URI with https scheme.
-    -}
-    , authorizationServers :: [Text]
-    {- ^ List of authorization server issuer identifiers
-    Required for MCP. At least one entry.
-    -}
-    , scopesSupported :: Maybe [Scope]
-    {- ^ Scope values the resource server understands
-    Optional. e.g., ["mcp:read", "mcp:write"]
-    -}
-    , bearerMethodsSupported :: Maybe [Text]
-    {- ^ Token presentation methods supported
-    Optional. Default: ["header"] per RFC9728
-    -}
-    , resourceName :: Maybe Text
-    {- ^ Human-readable name for end-user display
-    Optional. e.g., "My MCP Server"
-    -}
-    , resourceDocumentation :: Maybe Text
-    {- ^ URL of developer documentation
-    Optional.
-    -}
-    }
-    deriving (Show, Generic)
-
-instance FromJSON OAuthMetadata where
-    parseJSON = Aeson.withObject "OAuthMetadata" $ \v ->
-        OAuthMetadata
-            <$> v Aeson..: "issuer"
-            <*> v Aeson..: "authorization_endpoint"
-            <*> v Aeson..: "token_endpoint"
-            <*> v Aeson..:? "registration_endpoint"
-            <*> v Aeson..:? "userinfo_endpoint"
-            <*> v Aeson..:? "jwks_uri"
-            <*> v Aeson..:? "scopes_supported"
-            <*> v Aeson..: "response_types_supported"
-            <*> v Aeson..:? "grant_types_supported"
-            <*> v Aeson..:? "token_endpoint_auth_methods_supported"
-            <*> v Aeson..:? "code_challenge_methods_supported"
-
-instance ToJSON OAuthMetadata where
-    toJSON OAuthMetadata{..} =
-        Aeson.object $
-            [ "issuer" Aeson..= issuer
-            , "authorization_endpoint" Aeson..= authorizationEndpoint
-            , "token_endpoint" Aeson..= tokenEndpoint
-            , "response_types_supported" Aeson..= responseTypesSupported
-            ]
-                ++ maybe [] (\x -> ["registration_endpoint" Aeson..= x]) registrationEndpoint
-                ++ maybe [] (\x -> ["userinfo_endpoint" Aeson..= x]) userInfoEndpoint
-                ++ maybe [] (\x -> ["jwks_uri" Aeson..= x]) jwksUri
-                ++ maybe [] (\x -> ["scopes_supported" Aeson..= x]) scopesSupported
-                ++ maybe [] (\x -> ["grant_types_supported" Aeson..= x]) grantTypesSupported
-                ++ maybe [] (\x -> ["token_endpoint_auth_methods_supported" Aeson..= x]) tokenEndpointAuthMethodsSupported
-                ++ maybe [] (\x -> ["code_challenge_methods_supported" Aeson..= x]) codeChallengeMethodsSupported
-
-instance FromJSON ProtectedResourceMetadata where
-    parseJSON = Aeson.withObject "ProtectedResourceMetadata" $ \v ->
-        ProtectedResourceMetadata
-            <$> v Aeson..: "resource"
-            <*> v Aeson..: "authorization_servers"
-            <*> v Aeson..:? "scopes_supported"
-            <*> v Aeson..:? "bearer_methods_supported"
-            <*> v Aeson..:? "resource_name"
-            <*> v Aeson..:? "resource_documentation"
-
-instance ToJSON ProtectedResourceMetadata where
-    toJSON ProtectedResourceMetadata{..} =
-        Aeson.object $
-            [ "resource" Aeson..= resource
-            , "authorization_servers" Aeson..= authorizationServers
-            ]
-                ++ maybe [] (\x -> ["scopes_supported" Aeson..= x]) scopesSupported
-                ++ maybe [] (\x -> ["bearer_methods_supported" Aeson..= x]) bearerMethodsSupported
-                ++ maybe [] (\x -> ["resource_name" Aeson..= x]) resourceName
-                ++ maybe [] (\x -> ["resource_documentation" Aeson..= x]) resourceDocumentation
 
 -- | Token introspection response
 data TokenInfo = TokenInfo
@@ -289,7 +182,7 @@ generateCodeChallenge verifier =
 
 -- | Validate PKCE code verifier against challenge
 validateCodeVerifier :: CodeVerifier -> CodeChallenge -> Bool
-validateCodeVerifier (CodeVerifier verifier) (CodeChallenge challenge) = generateCodeChallenge verifier == challenge
+validateCodeVerifier verifier challenge = generateCodeChallenge (unCodeVerifier verifier) == unCodeChallenge challenge
 
 -- | Type-level tag for MCP protected resource authentication
 data ProtectedResourceAuth

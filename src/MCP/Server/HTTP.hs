@@ -27,7 +27,10 @@ module MCP.Server.HTTP (
     HTTPServerConfig (..),
 
     -- * Demo Configuration Helpers
-    defaultDemoOAuthConfig,
+    DemoOAuthBundle (..),
+    mkDemoOAuthBundle,
+    mkDemoOAuthBundleFromText,
+    defaultDemoOAuthBundle,
     defaultProtectedResourceMetadata,
 
     -- * Entry Points
@@ -69,12 +72,15 @@ import Data.ByteString.Lazy qualified as LBS
 import Data.Functor.Contravariant (contramap)
 import Data.Generics.Product (HasType, getTyped)
 import Data.Generics.Sum.Typed (AsType, injectTyped)
+import Data.List.NonEmpty (NonEmpty ((:|)))
+import Data.Map.Strict qualified as Map
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import GHC.Generics (Generic)
 import Network.HTTP.Media ((//), (/:))
+import Network.URI (URI, parseURI)
 import Network.Wai (Application)
 import Network.Wai.Handler.Warp (run)
 import Network.Wai.Middleware.RequestLogger (logStdoutDev)
@@ -86,7 +92,7 @@ import Servant.Server.Internal.Handler (runHandler)
 
 import MCP.Protocol
 import MCP.Server (MCPServer (..), MCPServerM, ServerConfig (..), ServerState (..), initialServerState, runMCPServer)
-import MCP.Server.Auth (OAuthConfig (..), OAuthProvider (..), ProtectedResourceMetadata (..))
+import MCP.Server.Auth (MCPOAuthConfig (..), OAuthProvider (..), ProtectedResourceMetadata (..), defaultDemoMCPOAuthConfig)
 import MCP.Server.HTTP.AppEnv (AppEnv (..), HTTPServerConfig (..), runAppM)
 import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Trace.Operation (OperationTrace (..))
@@ -95,11 +101,22 @@ import MCP.Types
 import Plow.Logging (IOTracer (..), Tracer (..), traceWith)
 import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..))
 import Servant.OAuth2.IDP.Auth.Demo (AuthUser (..), DemoCredentialEnv (..), defaultDemoCredentialStore)
-import Servant.OAuth2.IDP.LoginFlowError (LoginFlowError)
+import Servant.OAuth2.IDP.Config (OAuthEnv (..))
+import Servant.OAuth2.IDP.Errors (
+    AuthorizationError (..),
+    InvalidRequestReason (..),
+    LoginFlowError,
+    MalformedReason (..),
+    OAuthErrorCode (..),
+    OAuthErrorResponse (..),
+    ValidationError (..),
+ )
+import Servant.OAuth2.IDP.Metadata (BearerMethod (..), mkProtectedResourceMetadata, mkProtectedResourceMetadataForDemo)
 import Servant.OAuth2.IDP.Server (LoginForm, OAuthAPI, oauthServer)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Store.InMemory (OAuthTVarEnv, defaultExpiryConfig, newOAuthTVarEnv)
-import Servant.OAuth2.IDP.Types (AuthorizationError (..), ClientAuthMethod (..), CodeChallengeMethod (..), GrantType (..), OAuthErrorResponse (..), PendingAuthorization (..), RedirectUri (..), ResponseType (..), Scope (..), UserId (..), ValidationError (..), unUserId)
+import Servant.OAuth2.IDP.Trace (OAuthTrace)
+import Servant.OAuth2.IDP.Types (ClientAuthMethod (..), CodeChallengeMethod (..), GrantType (..), OAuthGrantType (..), PendingAuthorization (..), RedirectUri (..), ResponseType (..), Scope, UserId (..), mkScope, unUserId)
 
 -- | HTML content type for Servant
 data HTML
@@ -239,6 +256,8 @@ mcpAppWithOAuth ::
     , AsType LoginFlowError e
     , HasType HTTPServerConfig env
     , HasType (IOTracer HTTPTrace) env
+    , HasType OAuthEnv env
+    , HasType (IOTracer OAuthTrace) env
     , HasType JWTSettings env
     , HasType (TVar ServerState) env
     ) =>
@@ -271,7 +290,7 @@ mcpAppWithOAuth runM jwtSettings =
         -- Call mcpServerAuth by lifting from Handler back to m
         result <- liftIO $ runHandler $ mcpServerAuth config tracer stateVar authResult requestValue
         case result of
-            Left err -> throwError (injectTyped @AuthorizationError (InvalidGrant $ T.pack $ show err))
+            Left err -> throwError (injectTyped @AuthorizationError (InvalidRequest (MalformedRequest (UnparseableBody (T.pack (show err))))))
             Right val -> pure val
 
 -- | Create a WAI Application for the MCP HTTP server (internal monomorphic version)
@@ -279,14 +298,13 @@ mcpAppInternal :: (MCPServer MCPServerM) => HTTPServerConfig -> IOTracer HTTPTra
 mcpAppInternal config tracer stateVar oauthEnv jwtSettings =
     let cookieSettings = defaultCookieSettings
         authContext = cookieSettings :. jwtSettings :. EmptyContext
-        baseApp = case httpOAuthConfig config of
-            Just oauthCfg
-                | oauthEnabled oauthCfg ->
-                    serveWithContext
-                        (Proxy :: Proxy (CompleteAPI '[JWT]))
-                        authContext
-                        (oauthServerNew config tracer oauthEnv jwtSettings :<|> mcpServerAuth config tracer stateVar)
-            _ ->
+        baseApp = case httpMCPOAuthConfig config of
+            Just _mcpOAuthCfg ->
+                serveWithContext
+                    (Proxy :: Proxy (CompleteAPI '[JWT]))
+                    authContext
+                    (oauthServerNew config tracer oauthEnv jwtSettings :<|> mcpServerAuth config tracer stateVar)
+            Nothing ->
                 serve (Proxy :: Proxy UnprotectedMCPAPI) (mcpServerNoAuth config tracer stateVar)
      in if httpEnableLogging config
             then logStdoutDev baseApp
@@ -296,12 +314,17 @@ mcpAppInternal config tracer stateVar oauthEnv jwtSettings =
     oauthServerNew :: HTTPServerConfig -> IOTracer HTTPTrace -> OAuthTVarEnv -> JWTSettings -> Server OAuthAPI
     oauthServerNew cfg httpTracer oauth jwtSet =
         let authEnv = DemoCredentialEnv defaultDemoCredentialStore
+            oauthCfgEnv = bundleEnv defaultDemoOAuthBundle
+            -- Create OAuth tracer by mapping HTTPOAuth constructor over HTTP tracer
+            oauthTracer = contramap HTTPOAuth httpTracer
             appEnv =
                 AppEnv
                     { envOAuth = oauth
                     , envAuth = authEnv
                     , envConfig = cfg
                     , envTracer = httpTracer
+                    , envOAuthEnv = oauthCfgEnv
+                    , envOAuthTracer = oauthTracer
                     , envJWT = jwtSet
                     , envServerState = stateVar
                     , envTimeProvider = Nothing -- Use real IO time for production
@@ -329,7 +352,7 @@ mcpServerAuth httpConfig httpTracer stateTVar authResult requestValue =
             throwError $
                 err401
                     { errHeaders = [("WWW-Authenticate", wwwAuthenticateValue)]
-                    , errBody = encode $ OAuthErrorResponse "invalid_client" (Just "Bearer token required")
+                    , errBody = encode $ OAuthErrorResponse ErrInvalidClient (Just "Bearer token required")
                     }
         NoSuchUser -> do
             liftIO $ traceWith httpTracer $ HTTPAuthFailure "No such user"
@@ -337,7 +360,7 @@ mcpServerAuth httpConfig httpTracer stateTVar authResult requestValue =
             throwError $
                 err401
                     { errHeaders = [("WWW-Authenticate", wwwAuthenticateValue)]
-                    , errBody = encode $ OAuthErrorResponse "invalid_client" (Just "Bearer token required")
+                    , errBody = encode $ OAuthErrorResponse ErrInvalidClient (Just "Bearer token required")
                     }
         Indefinite -> do
             liftIO $ traceWith httpTracer $ HTTPAuthFailure "Authentication indefinite"
@@ -345,7 +368,7 @@ mcpServerAuth httpConfig httpTracer stateTVar authResult requestValue =
             throwError $
                 err401
                     { errHeaders = [("WWW-Authenticate", wwwAuthenticateValue)]
-                    , errBody = encode $ OAuthErrorResponse "invalid_client" (Just "Bearer token required")
+                    , errBody = encode $ OAuthErrorResponse ErrInvalidClient (Just "Bearer token required")
                     }
   where
     metadataUrl = httpBaseUrl httpConfig <> "/.well-known/oauth-protected-resource"
@@ -651,50 +674,95 @@ extractCapabilityNames (ServerCapabilities res prpts tls comps logCap _exp) =
         , maybe [] (const ["logging"]) logCap
         ]
 
--- | Default demo OAuth configuration for testing purposes
-defaultDemoOAuthConfig :: OAuthConfig
-defaultDemoOAuthConfig =
-    OAuthConfig
-        { oauthEnabled = True
-        , oauthProviders = []
-        , requireHTTPS = False -- For demo only
-        -- Default timing parameters
-        , authCodeExpirySeconds = 600 -- 10 minutes
-        , accessTokenExpirySeconds = 3600 -- 1 hour
-        -- Default OAuth parameters
-        , supportedScopes = [Scope "mcp:read", Scope "mcp:write"]
-        , supportedResponseTypes = [ResponseCode]
-        , supportedGrantTypes = [GrantAuthorizationCode, GrantRefreshToken]
-        , supportedAuthMethods = [AuthNone]
-        , supportedCodeChallengeMethods = [S256]
-        , -- Demo mode settings (interactive login required)
-          autoApproveAuth = False
-        , demoUserIdTemplate = Nothing
-        , demoEmailDomain = "example.com"
-        , demoUserName = "Test User"
-        , publicClientSecret = Just ""
-        , -- Default token prefixes
-          authCodePrefix = "code_"
-        , refreshTokenPrefix = "rt_"
-        , clientIdPrefix = "client_"
-        , -- Default response template
-          authorizationSuccessTemplate = Nothing
-        , -- Credential management
-          credentialStore = defaultDemoCredentialStore
-        , loginSessionExpirySeconds = 600 -- 10 minutes
-        }
+{- | Helper to create known-valid Scope from hardcoded strings.
+This is safe because the input strings are compile-time constants that we know are valid.
+-}
+mkKnownScope :: Text -> Scope
+mkKnownScope t = case mkScope t of
+    Just s -> s
+    Nothing -> Prelude.error $ "mkKnownScope: invalid hardcoded scope: " <> T.unpack t
+
+{- | Bundle of OAuth configuration for demo/testing
+Contains both protocol-level settings (OAuthEnv) and MCP-specific settings.
+-}
+data DemoOAuthBundle = DemoOAuthBundle
+    { bundleEnv :: OAuthEnv
+    -- ^ Protocol-level OAuth environment configuration
+    , bundleMCPConfig :: MCPOAuthConfig
+    -- ^ MCP-specific OAuth settings
+    }
+    deriving (Generic)
+
+-- | Create a demo OAuth bundle with a custom base URL
+mkDemoOAuthBundle :: URI -> DemoOAuthBundle
+mkDemoOAuthBundle baseUri =
+    let resourceMetadata = case mkProtectedResourceMetadataForDemo
+            baseUri
+            (baseUri :| [])
+            (Just [mkKnownScope "mcp:read", mkKnownScope "mcp:write"])
+            (Just (BearerHeader :| []))
+            Nothing
+            Nothing of
+            Just m -> m
+            Nothing -> Prelude.error $ "Invalid base URL for resource metadata: " ++ show baseUri
+        oauthEnv =
+            OAuthEnv
+                { oauthRequireHTTPS = False -- For demo only
+                , oauthBaseUrl = baseUri
+                , oauthAuthCodeExpiry = 600 -- 10 minutes
+                , oauthAccessTokenExpiry = 3600 -- 1 hour
+                , oauthLoginSessionExpiry = 600 -- 10 minutes
+                , oauthAuthCodePrefix = "code_"
+                , oauthRefreshTokenPrefix = "rt_"
+                , oauthClientIdPrefix = "client_"
+                , oauthSupportedScopes = [mkKnownScope "mcp:read", mkKnownScope "mcp:write"]
+                , oauthSupportedResponseTypes = ResponseCode :| []
+                , oauthSupportedGrantTypes = OAuthAuthorizationCode :| [OAuthClientCredentials]
+                , oauthSupportedAuthMethods = AuthNone :| []
+                , oauthSupportedCodeChallengeMethods = S256 :| []
+                , resourceServerBaseUrl = baseUri
+                , resourceServerMetadata = resourceMetadata
+                , oauthServerName = "MCP Server"
+                , oauthScopeDescriptions =
+                    Map.fromList
+                        [ (mkKnownScope "mcp:read", "Read MCP resources")
+                        , (mkKnownScope "mcp:write", "Write MCP resources")
+                        , (mkKnownScope "mcp:tools", "Execute MCP tools")
+                        ]
+                }
+     in DemoOAuthBundle
+            { bundleEnv = oauthEnv
+            , bundleMCPConfig = defaultDemoMCPOAuthConfig
+            }
+
+{- | Create a demo OAuth bundle from a Text base URL
+
+This is a convenience wrapper for cases where you have a Text URL
+(e.g., from configuration or CLI arguments).
+-}
+mkDemoOAuthBundleFromText :: Text -> Maybe DemoOAuthBundle
+mkDemoOAuthBundleFromText baseUrlText =
+    mkDemoOAuthBundle <$> parseURI (T.unpack baseUrlText)
+
+-- | Default demo OAuth bundle for testing purposes (uses localhost:8080)
+defaultDemoOAuthBundle :: DemoOAuthBundle
+defaultDemoOAuthBundle =
+    case parseURI "http://localhost:8080" of
+        Just uri -> mkDemoOAuthBundle uri
+        Nothing -> Prelude.error "Invalid hardcoded base URL in defaultDemoOAuthBundle"
 
 -- | Default protected resource metadata for a given base URL
-defaultProtectedResourceMetadata :: Text -> ProtectedResourceMetadata
+defaultProtectedResourceMetadata :: URI -> ProtectedResourceMetadata
 defaultProtectedResourceMetadata baseUrl =
-    ProtectedResourceMetadata
-        { resource = baseUrl
-        , authorizationServers = [baseUrl]
-        , scopesSupported = Just [Scope "mcp:read", Scope "mcp:write"]
-        , bearerMethodsSupported = Just ["header"]
-        , resourceName = Nothing
-        , resourceDocumentation = Nothing
-        }
+    case mkProtectedResourceMetadata
+        baseUrl
+        (baseUrl :| [])
+        (Just [mkKnownScope "mcp:read", mkKnownScope "mcp:write"])
+        (Just (BearerHeader :| []))
+        Nothing
+        Nothing of
+        Just metadata -> metadata
+        Nothing -> Prelude.error "defaultProtectedResourceMetadata: invalid base URL (must be absolute HTTPS URI)"
 
 -- | Map scope to human-readable description
 scopeToDescription :: Text -> Text
@@ -742,6 +810,10 @@ demoMcpApp = do
     -- Create null tracer (discards all traces)
     let tracer = IOTracer (Tracer (\_ -> pure ()))
 
+    -- Get default demo OAuth bundle
+    let bundle = defaultDemoOAuthBundle
+        mcpConfig = bundleMCPConfig bundle
+
     -- Create default demo configuration
     let config =
             HTTPServerConfig
@@ -750,10 +822,12 @@ demoMcpApp = do
                 , httpServerInfo = Implementation "mcp-demo" (Just "0.3.0") ""
                 , httpCapabilities = ServerCapabilities Nothing Nothing Nothing Nothing Nothing Nothing
                 , httpEnableLogging = False
-                , httpOAuthConfig = Just defaultDemoOAuthConfig
+                , httpMCPOAuthConfig = Just mcpConfig
                 , httpJWK = Just jwk
                 , httpProtocolVersion = "2025-06-18"
-                , httpProtectedResourceMetadata = Just (defaultProtectedResourceMetadata "http://localhost:8080")
+                , httpProtectedResourceMetadata = case parseURI "http://localhost:8080" of
+                    Just uri -> Just (defaultProtectedResourceMetadata uri)
+                    Nothing -> Nothing
                 }
 
     -- Create demo credential environment
@@ -762,6 +836,11 @@ demoMcpApp = do
     -- Initialize server state
     stateVar <- newTVarIO $ initialServerState (httpCapabilities config)
 
+    -- Get OAuthEnv from bundle
+    let oauthCfgEnv = bundleEnv bundle
+        -- Create OAuth tracer by mapping HTTPOAuth constructor over HTTP tracer
+        oauthTracer = contramap HTTPOAuth tracer
+
     -- Create AppEnv with all fields including stateVar
     let appEnv =
             AppEnv
@@ -769,6 +848,8 @@ demoMcpApp = do
                 , envAuth = authEnv
                 , envConfig = config
                 , envTracer = tracer
+                , envOAuthEnv = oauthCfgEnv
+                , envOAuthTracer = oauthTracer
                 , envJWT = jwtSettings
                 , envServerState = stateVar
                 , envTimeProvider = Nothing -- Use real IO time
@@ -793,11 +874,11 @@ runServerHTTP config tracer = do
 
     traceWith tracer $ HTTPServerStarting (httpPort config) (httpBaseUrl config)
 
-    when (maybe False oauthEnabled (httpOAuthConfig config)) $ do
+    when (isJust (httpMCPOAuthConfig config)) $ do
         let authEp = httpBaseUrl config <> "/authorize"
             tokenEp = httpBaseUrl config <> "/token"
         traceWith tracer $ HTTPOAuthEnabled authEp tokenEp
-        case httpOAuthConfig config >>= \cfg -> if null (oauthProviders cfg) then Nothing else Just (oauthProviders cfg) of
+        case httpMCPOAuthConfig config >>= \cfg -> if null (oauthProviders cfg) then Nothing else Just (oauthProviders cfg) of
             Just providers -> do
                 traceWith tracer $ HTTPOAuthProviders (map providerName providers)
                 when (any requiresPKCE providers) $ traceWith tracer HTTPPKCEEnabled

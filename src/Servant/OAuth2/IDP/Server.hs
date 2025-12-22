@@ -37,10 +37,6 @@ This allows the server to work with different storage and auth backends:
 -- Create server with specific monad
 server :: Server OAuthAPI
 server = hoistServer (Proxy :: Proxy OAuthAPI) (runAppM appEnv) oauthServer
-
--- Or use directly with AppM from MCP.Server.HTTP.AppEnv
-app :: Application
-app = serve (Proxy :: Proxy OAuthAPI) oauthServer
 @
 
 = Module Structure
@@ -89,8 +85,6 @@ import Servant (
  )
 import Servant.Auth.Server (JWTSettings, ToJWT)
 
-import MCP.Server.HTTP.AppEnv (HTTPServerConfig)
-import MCP.Trace.HTTP (HTTPTrace)
 import Plow.Logging (IOTracer)
 import Servant.OAuth2.IDP.API (
     ClientRegistrationRequest,
@@ -103,6 +97,8 @@ import Servant.OAuth2.IDP.API (
     TokenResponse,
  )
 import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..))
+import Servant.OAuth2.IDP.Config (OAuthEnv)
+import Servant.OAuth2.IDP.Errors (AuthorizationError, LoginFlowError, ValidationError)
 import Servant.OAuth2.IDP.Handlers (
     handleAuthCodeGrant,
     handleAuthorize,
@@ -113,9 +109,8 @@ import Servant.OAuth2.IDP.Handlers (
     handleRegister,
     handleToken,
  )
-import Servant.OAuth2.IDP.LoginFlowError (LoginFlowError)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
-import Servant.OAuth2.IDP.Types (AuthorizationError, ValidationError)
+import Servant.OAuth2.IDP.Trace (OAuthTrace)
 
 -- -----------------------------------------------------------------------------
 -- Constraint Alias
@@ -155,7 +150,7 @@ architecture (OAuthStateStore, AuthBackend, MonadTime).
 
 == Usage
 
-To use this server with AppM from MCP.Server.HTTP.AppEnv:
+To use this server with a ReaderT (ExceptT m):
 
 @
 -- Create AppEnv combining all dependencies
@@ -200,8 +195,8 @@ oauthServer ::
     , AsType ValidationError e
     , AsType AuthorizationError e
     , AsType LoginFlowError e
-    , HasType HTTPServerConfig env
-    , HasType (IOTracer HTTPTrace) env
+    , HasType OAuthEnv env
+    , HasType (IOTracer OAuthTrace) env
     , HasType JWTSettings env
     ) =>
     ServerT OAuthAPI m

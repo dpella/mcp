@@ -101,8 +101,8 @@ module Servant.OAuth2.IDP.Store (
     PendingAuthorization,
 ) where
 
+import Control.Monad.Time (MonadTime (..))
 import Data.Kind (Type)
-import MCP.Server.Time (MonadTime (..))
 import Servant.OAuth2.IDP.Types (
     AccessTokenId,
     AuthCodeId,

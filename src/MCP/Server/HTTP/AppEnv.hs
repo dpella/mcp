@@ -1,8 +1,10 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 
 {- |
@@ -65,6 +67,7 @@ module MCP.Server.HTTP.AppEnv (
 
     -- * Error Translation
     toServerError,
+    appErrorToServerError,
 ) where
 
 import Control.Concurrent.STM (TVar, atomically, readTVar, writeTVar)
@@ -83,19 +86,28 @@ import Data.Text.Lazy qualified as TL
 import Data.Time.Clock (UTCTime, addUTCTime)
 import GHC.Generics (Generic)
 import Lucid (renderText, toHtml)
+import Network.HTTP.Types.Status (statusCode)
 import Network.Wai.Handler.Warp (Port)
-import Servant (Handler, ServerError, err400, err401, err500, errBody)
+import Servant (Handler, ServerError (..), err400, err401, err500, errBody)
 import Servant.Auth.Server (JWTSettings)
 
 import MCP.Server (ServerState)
-import MCP.Server.Auth (OAuthConfig, ProtectedResourceMetadata)
-import MCP.Trace.HTTP (HTTPTrace (HTTPOAuthBoundary))
+import MCP.Server.Auth (MCPOAuthConfig, ProtectedResourceMetadata)
+import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Types (Implementation, ServerCapabilities)
 import Plow.Logging (IOTracer)
 import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..))
 import Servant.OAuth2.IDP.Auth.Demo (AuthUser, DemoAuthError (..), DemoCredentialEnv)
-import Servant.OAuth2.IDP.Boundary (domainErrorToServerError)
-import Servant.OAuth2.IDP.LoginFlowError (LoginFlowError)
+import Servant.OAuth2.IDP.Config (OAuthEnv)
+import Servant.OAuth2.IDP.Errors (
+    AuthorizationError (..),
+    LoginFlowError,
+    OAuthError (..),
+    ValidationError (..),
+    authorizationErrorToResponse,
+    oauthErrorToServerError,
+    validationErrorToResponse,
+ )
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Store.InMemory (
     ExpiryConfig (..),
@@ -103,15 +115,10 @@ import Servant.OAuth2.IDP.Store.InMemory (
     OAuthStoreError (..),
     OAuthTVarEnv (..),
  )
+import Servant.OAuth2.IDP.Trace (OAuthTrace)
 import Servant.OAuth2.IDP.Types (
-    AuthCodeId (..),
     AuthorizationCode (..),
-    AuthorizationError (..),
     PendingAuthorization (..),
-    SessionId (..),
-    ValidationError (..),
-    authorizationErrorToResponse,
-    validationErrorToResponse,
  )
 
 -- -----------------------------------------------------------------------------
@@ -128,7 +135,7 @@ data HTTPServerConfig = HTTPServerConfig
     , httpServerInfo :: Implementation
     , httpCapabilities :: ServerCapabilities
     , httpEnableLogging :: Bool
-    , httpOAuthConfig :: Maybe OAuthConfig
+    , httpMCPOAuthConfig :: Maybe MCPOAuthConfig
     , httpJWK :: Maybe JWK -- JWT signing key
     , httpProtocolVersion :: Text -- MCP protocol version
     , httpProtectedResourceMetadata :: Maybe ProtectedResourceMetadata
@@ -163,6 +170,10 @@ data AppEnv = AppEnv
     -- ^ HTTP server configuration
     , envTracer :: IOTracer HTTPTrace
     -- ^ Tracer for HTTP and OAuth events
+    , envOAuthEnv :: OAuthEnv
+    -- ^ Protocol-agnostic OAuth configuration (for Servant.OAuth2.IDP handlers)
+    , envOAuthTracer :: IOTracer OAuthTrace
+    -- ^ OAuth-specific tracer (for Servant.OAuth2.IDP handlers)
     , envJWT :: JWTSettings
     -- ^ JWT settings for token signing and validation
     , envServerState :: TVar ServerState
@@ -219,9 +230,8 @@ newtype AppM a = AppM
 
 Executes the ReaderT and ExceptT layers, translating AppError to ServerError.
 
-Uses 'domainErrorToServerError' from OAuth.Boundary for centralized error
-translation with secure logging policy (associated types are logged but
-return generic errors, fixed types are safe to expose).
+Uses 'appErrorToServerError' for centralized error translation that maps
+all AppError constructors to appropriate HTTP responses via oauthErrorToServerError.
 
 @
 handler :: AppEnv -> AppM a -> Handler a
@@ -232,13 +242,7 @@ runAppM :: AppEnv -> AppM a -> Handler a
 runAppM env action = do
     result <- runExceptT $ runReaderT (unAppM action) env
     case result of
-        Left err -> do
-            -- Use domainErrorToServerError for centralized translation
-            -- Type annotation helps resolve ambiguous associated types
-            mServerErr <- domainErrorToServerError @Handler @AppM (envTracer env) HTTPOAuthBoundary err
-            case mServerErr of
-                Just serverErr -> throwError serverErr
-                Nothing -> throwError err500{errBody = "Internal server error"}
+        Left err -> throwError (appErrorToServerError err)
         Right a -> pure a
 
 -- -----------------------------------------------------------------------------
@@ -320,11 +324,53 @@ toServerError (ValidationErr validationErr) =
     let (_status, message) = validationErrorToResponse validationErr
      in err400{errBody = toLBS message}
 toServerError (AuthorizationErr authzErr) =
-    let (_status, oauthResp) = authorizationErrorToResponse authzErr
-     in err400{errBody = encode oauthResp}
+    let (status, oauthResp) = authorizationErrorToResponse authzErr
+     in ServerError
+            { errHTTPCode = statusCode status
+            , errReasonPhrase = ""
+            , errBody = encode oauthResp
+            , errHeaders = [("Content-Type", "application/json; charset=utf-8")]
+            }
 toServerError (LoginFlowErr loginErr) =
     -- Render LoginFlowError as HTML using ToHtml instance
     err400{errBody = LBS.fromStrict . TE.encodeUtf8 . TL.toStrict . renderText . toHtml $ loginErr}
+
+{- | Translate AppError to Servant ServerError using oauthErrorToServerError.
+
+Maps AppError constructors to OAuthError and delegates to oauthErrorToServerError:
+
+* 'OAuthStoreErr': Maps to OAuthStore constructor → 500 Internal Server Error
+* 'ValidationErr': Maps to OAuthValidation constructor → 400 Bad Request
+* 'AuthorizationErr': Maps to OAuthAuthorization constructor → varies (400/401/403)
+* 'LoginFlowErr': Maps to OAuthLoginFlow constructor → 400 Bad Request
+* 'AuthBackendErr': Logs and returns generic 401 (credentials are sensitive)
+
+This function is used by runAppM to convert domain errors at the Servant boundary.
+-}
+appErrorToServerError :: AppError -> ServerError
+appErrorToServerError (OAuthStoreErr storeErr) =
+    -- Construct OAuthError AppM and delegate to oauthErrorToServerError
+    -- This maps to 500 with generic message (no backend leakage)
+    oauthErrorToServerError (OAuthStore storeErr :: OAuthError AppM)
+appErrorToServerError (ValidationErr validationErr) =
+    -- Construct OAuthError AppM and delegate to oauthErrorToServerError
+    -- This maps to 400 with descriptive plain text
+    oauthErrorToServerError (OAuthValidation validationErr :: OAuthError AppM)
+appErrorToServerError (AuthorizationErr authzErr) =
+    -- Construct OAuthError AppM and delegate to oauthErrorToServerError
+    -- This maps to appropriate status (400/401/403) with JSON
+    oauthErrorToServerError (OAuthAuthorization authzErr :: OAuthError AppM)
+appErrorToServerError (LoginFlowErr loginErr) =
+    -- Construct OAuthError AppM and delegate to oauthErrorToServerError
+    -- This maps to 400 with HTML error page
+    oauthErrorToServerError (OAuthLoginFlow loginErr :: OAuthError AppM)
+appErrorToServerError (AuthBackendErr _authErr) =
+    -- AuthBackendErr is MCP-specific, not OAuth protocol error
+    -- Return generic 401 without leaking credential details
+    err401
+        { errBody = "Unauthorized"
+        , errHeaders = [("Content-Type", "text/plain; charset=utf-8")]
+        }
 
 -- -----------------------------------------------------------------------------
 -- Utilities
@@ -415,8 +461,7 @@ instance OAuthStateStore AppM where
         now <- currentTime
         liftIO $ atomically $ do
             state <- readTVar (oauthStateVar oauthEnv)
-            let key = unAuthCodeId codeId
-            case Map.lookup key (authCodes state) of
+            case Map.lookup codeId (authCodes state) of
                 Nothing -> pure Nothing
                 Just authCode ->
                     if now >= authExpiry authCode
@@ -433,15 +478,14 @@ instance OAuthStateStore AppM where
         now <- currentTime
         liftIO $ atomically $ do
             state <- readTVar (oauthStateVar oauthEnv)
-            let key = unAuthCodeId codeId
-            case Map.lookup key (authCodes state) of
+            case Map.lookup codeId (authCodes state) of
                 Nothing -> pure Nothing
                 Just code
                     -- Check if expired
                     | now >= authExpiry code -> pure Nothing
                     | otherwise -> do
                         -- Delete the code atomically within the same transaction
-                        let newState = state{authCodes = Map.delete key (authCodes state)}
+                        let newState = state{authCodes = Map.delete codeId (authCodes state)}
                         writeTVar (oauthStateVar oauthEnv) newState
                         pure (Just code)
 
@@ -484,8 +528,7 @@ instance OAuthStateStore AppM where
         let config = oauthExpiryConfig oauthEnv
         liftIO $ atomically $ do
             state <- readTVar (oauthStateVar oauthEnv)
-            let key = unSessionId sessionId
-            case Map.lookup key (pendingAuthorizations state) of
+            case Map.lookup sessionId (pendingAuthorizations state) of
                 Nothing -> pure Nothing
                 Just auth ->
                     let expiryTime = addUTCTime (loginSessionExpiry config) (pendingCreatedAt auth)

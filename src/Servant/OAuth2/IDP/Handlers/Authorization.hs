@@ -22,15 +22,12 @@ import Control.Monad (unless, when)
 import Control.Monad.Error.Class (MonadError, throwError)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Reader (MonadReader, asks)
-import Data.Functor.Contravariant (contramap)
 import Data.Generics.Product (HasType)
 import Data.Generics.Product.Typed (getTyped)
 import Data.Generics.Sum.Typed (AsType, injectTyped)
 import Data.List.NonEmpty qualified as NE
-import Data.Maybe (isJust)
 import Data.Set qualified as Set
 import Data.Text qualified as T
-import Data.UUID.V4 qualified as UUID
 import Network.URI (parseURI)
 import Servant (
     Header,
@@ -39,18 +36,21 @@ import Servant (
  )
 import Web.HttpApiData (ToHttpApiData (..), toUrlPiece)
 
-import Data.UUID qualified as UUID
-import MCP.Server.Auth (OAuthConfig (..))
-import MCP.Server.HTTP.AppEnv (HTTPServerConfig (..))
-import MCP.Server.Time (MonadTime (..))
-import MCP.Trace.HTTP (HTTPTrace (..))
-import MCP.Trace.OAuth qualified as OAuthTrace
+import Control.Monad.Time (MonadTime (..))
+import Data.Time.Clock (nominalDiffTimeToSeconds)
 import Plow.Logging (IOTracer, traceWith)
+import Servant.OAuth2.IDP.Config (OAuthEnv (..))
+import Servant.OAuth2.IDP.Errors (
+    ValidationError (..),
+ )
 import Servant.OAuth2.IDP.Handlers.HTML (LoginPage (..))
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
+import Servant.OAuth2.IDP.Trace (
+    OAuthTrace (..),
+    OperationResult (..),
+ )
 import Servant.OAuth2.IDP.Types (
-    AuthorizationError (..),
-    ClientId (..),
+    ClientId,
     ClientInfo (..),
     CodeChallenge,
     CodeChallengeMethod (..),
@@ -59,13 +59,12 @@ import Servant.OAuth2.IDP.Types (
     RedirectUri,
     ResourceIndicator (..),
     ResponseType (..),
-    Scope (..),
     Scopes (..),
     SessionCookie (..),
-    ValidationError (..),
-    mkSessionId,
+    generateSessionId,
     serializeScopeSet,
-    unClientId,
+    unClientName,
+    unSessionId,
  )
 
 {- | Authorization endpoint handler (polymorphic).
@@ -105,9 +104,8 @@ handleAuthorize ::
     , MonadReader env m
     , MonadError e m
     , AsType ValidationError e
-    , AsType AuthorizationError e
-    , HasType HTTPServerConfig env
-    , HasType (IOTracer HTTPTrace) env
+    , HasType OAuthEnv env
+    , HasType (IOTracer OAuthTrace) env
     ) =>
     ResponseType ->
     ClientId ->
@@ -119,55 +117,44 @@ handleAuthorize ::
     Maybe ResourceIndicator ->
     m (Headers '[Header "Set-Cookie" SessionCookie] LoginPage)
 handleAuthorize responseType clientId redirectUri codeChallenge codeChallengeMethod mScope mState mResource = do
-    config <- asks (getTyped @HTTPServerConfig)
-    tracer <- asks (getTyped @(IOTracer HTTPTrace))
+    config <- asks (getTyped @OAuthEnv)
+    tracer <- asks (getTyped @(IOTracer OAuthTrace))
 
-    let oauthTracer = contramap HTTPOAuth tracer
-        responseTypeText = toUrlPiece responseType
-        clientIdText = unClientId clientId
-        redirectUriText = toUrlPiece redirectUri
-        codeChallengeMethodText = toUrlPiece codeChallengeMethod
-
-    -- Log resource parameter for RFC8707 support
-    liftIO $ traceWith tracer $ HTTPResourceParameterDebug (fmap unResourceIndicator mResource) "authorize endpoint"
+    let responseTypeText = toUrlPiece responseType
 
     -- Validate response_type (only "code" supported)
     when (responseType /= ResponseCode) $ do
-        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "response_type" ("Unsupported response type: " <> responseTypeText)
+        liftIO $ traceWith tracer $ TraceValidationError $ UnsupportedResponseType responseTypeText
         throwError $ injectTyped @ValidationError $ UnsupportedResponseType responseTypeText
 
     -- Validate code_challenge_method (only "S256" supported)
     when (codeChallengeMethod /= S256) $ do
-        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "code_challenge_method" ("Unsupported method: " <> codeChallengeMethodText)
-        throwError $ injectTyped @AuthorizationError $ InvalidRequest ("Unsupported code_challenge_method: " <> codeChallengeMethodText)
+        throwError $ injectTyped @ValidationError $ UnsupportedCodeChallengeMethod codeChallengeMethod
 
     -- Look up client to verify it's registered
     mClientInfo <- lookupClient clientId
     clientInfo <- case mClientInfo of
         Just ci -> return ci
         Nothing -> do
-            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "client_id" ("Unregistered client: " <> clientIdText)
+            liftIO $ traceWith tracer $ TraceValidationError $ ClientNotRegistered clientId
             throwError $ injectTyped @ValidationError $ ClientNotRegistered clientId
 
     -- Validate redirect_uri is registered for this client
     unless (redirectUri `elem` NE.toList (clientRedirectUris clientInfo)) $ do
-        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "redirect_uri" ("Redirect URI not registered: " <> redirectUriText)
+        liftIO $ traceWith tracer $ TraceValidationError $ RedirectUriMismatch clientId redirectUri
         throwError $ injectTyped @ValidationError $ RedirectUriMismatch clientId redirectUri
 
-    let displayName = clientName clientInfo
-        -- Convert Scopes to [Text] for tracing
+    let displayName = unClientName $ clientName clientInfo
+        -- Convert Scopes to [Scope] for tracing
         scopeList = case mScope of
             Nothing -> []
-            Just (Scopes scopes) -> map unScope (Set.toList scopes)
+            Just (Scopes scopes) -> Set.toList scopes
 
     -- Emit authorization request trace
-    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthAuthorizationRequest clientIdText scopeList (isJust mState)
+    liftIO $ traceWith tracer $ TraceAuthorizationRequest clientId scopeList Success
 
     -- Generate session ID
-    sessionIdText <- liftIO $ UUID.toText <$> UUID.nextRandom
-    let sessionId = case mkSessionId sessionIdText of
-            Just sid -> sid
-            Nothing -> error "Generated invalid session UUID"
+    sessionId <- liftIO generateSessionId
     now <- currentTime
 
     -- Extract Set Scope from Scopes (already parsed by Servant)
@@ -192,14 +179,14 @@ handleAuthorize responseType clientId redirectUri codeChallenge codeChallengeMet
     storePendingAuth sessionId pending
 
     -- Emit login page served trace
-    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthLoginPageServed sessionIdText
+    liftIO $ traceWith tracer $ TraceLoginPageServed sessionId
 
     -- Build session cookie
-    let sessionExpirySeconds = maybe 600 loginSessionExpirySeconds (httpOAuthConfig config)
+    let sessionIdText = unSessionId sessionId
+        sessionExpirySeconds :: Integer
+        sessionExpirySeconds = truncate $ nominalDiffTimeToSeconds (oauthLoginSessionExpiry config)
         -- Add Secure flag if requireHTTPS is True in OAuth config
-        secureFlag = case httpOAuthConfig config of
-            Just oauthConf | requireHTTPS oauthConf -> "; Secure"
-            _ -> ""
+        secureFlag = if oauthRequireHTTPS config then "; Secure" else ""
         cookieValue = SessionCookie $ "mcp_session=" <> sessionIdText <> "; HttpOnly; SameSite=Strict; Path=/; Max-Age=" <> T.pack (show sessionExpirySeconds) <> secureFlag
         -- Convert Scopes to Text for display
         scopesText = case mScope of
@@ -211,6 +198,8 @@ handleAuthorize responseType clientId redirectUri codeChallenge codeChallengeMet
                 , loginScopes = scopesText
                 , loginResource = fmap unResourceIndicator mResource
                 , loginSessionId = sessionIdText
+                , loginServerName = oauthServerName config
+                , loginScopeDescriptions = oauthScopeDescriptions config
                 }
 
     return $ addHeader cookieValue loginPage

@@ -21,36 +21,32 @@ import Control.Monad (when)
 import Control.Monad.Error.Class (MonadError, throwError)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Reader (MonadReader, asks)
-import Data.Functor.Contravariant (contramap)
 import Data.Generics.Product (HasType)
 import Data.Generics.Product.Typed (getTyped)
 import Data.Generics.Sum.Typed (AsType, injectTyped)
 import Data.List.NonEmpty qualified as NE
 import Data.Set qualified as Set
-import Data.UUID.V4 qualified as UUID
 
-import Data.UUID qualified as UUID
-import MCP.Server.Auth (OAuthConfig (..), clientIdPrefix)
-import MCP.Server.HTTP.AppEnv (HTTPServerConfig (..))
-import MCP.Trace.HTTP (HTTPTrace (..))
-import MCP.Trace.OAuth qualified as OAuthTrace
 import Plow.Logging (IOTracer, traceWith)
 import Servant.OAuth2.IDP.API (
     ClientRegistrationRequest (..),
     ClientRegistrationResponse (..),
  )
+import Servant.OAuth2.IDP.Config (OAuthEnv (..))
+import Servant.OAuth2.IDP.Errors (
+    ValidationError (..),
+ )
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
+import Servant.OAuth2.IDP.Trace (OAuthTrace (..))
 import Servant.OAuth2.IDP.Types (
-    AuthorizationError (..),
-    ClientId (..),
     ClientInfo (..),
+    generateClientId,
     mkClientSecret,
-    unClientName,
  )
 
 {- | Dynamic client registration endpoint (polymorphic).
 
-Handles client registration per RFC 7591 and MCP OAuth specification.
+Handles client registration per RFC 7591.
 
 This handler is polymorphic over the monad @m@, requiring:
 
@@ -82,27 +78,25 @@ handleRegister ::
     , MonadIO m
     , MonadReader env m
     , MonadError e m
-    , AsType AuthorizationError e
-    , HasType HTTPServerConfig env
-    , HasType (IOTracer HTTPTrace) env
+    , AsType ValidationError e
+    , HasType OAuthEnv env
+    , HasType (IOTracer OAuthTrace) env
     ) =>
     ClientRegistrationRequest ->
     m ClientRegistrationResponse
 handleRegister (ClientRegistrationRequest clientName reqRedirects reqGrants reqResponses reqAuth) = do
-    config <- asks (getTyped @HTTPServerConfig)
-    tracer <- asks (getTyped @(IOTracer HTTPTrace))
+    oauthEnv <- asks (getTyped @OAuthEnv)
+    tracer <- asks (getTyped @(IOTracer OAuthTrace))
 
     -- Validate redirect_uris is not empty
     when (null reqRedirects) $
         throwError $
-            injectTyped @AuthorizationError $
-                InvalidRequest "redirect_uris must not be empty"
+            injectTyped @ValidationError $
+                EmptyRedirectUris
 
     -- Generate client ID
-    let prefix = maybe "client_" clientIdPrefix (httpOAuthConfig config)
-    uuid <- liftIO UUID.nextRandom
-    let clientIdText = prefix <> UUID.toText uuid
-        clientId = ClientId clientIdText
+    let prefix = oauthClientIdPrefix oauthEnv
+    clientId <- liftIO $ generateClientId prefix
 
     -- Convert NonEmpty to Set for ClientInfo
     -- Note: ClientInfo from OAuth.Types requires NonEmpty and Set
@@ -112,7 +106,7 @@ handleRegister (ClientRegistrationRequest clientName reqRedirects reqGrants reqR
         responsesSet = Set.fromList (NE.toList reqResponses)
         clientInfo =
             ClientInfo
-                { clientName = unClientName clientName
+                { clientName = clientName
                 , clientRedirectUris = redirectsNE
                 , clientGrantTypes = grantsSet
                 , clientResponseTypes = responsesSet
@@ -121,9 +115,8 @@ handleRegister (ClientRegistrationRequest clientName reqRedirects reqGrants reqR
 
     storeClient clientId clientInfo
 
-    -- Emit trace
-    let oauthTracer = contramap HTTPOAuth tracer
-    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthClientRegistration clientIdText (unClientName clientName)
+    -- Emit trace (use first redirect URI from NonEmpty list)
+    liftIO $ traceWith tracer $ TraceClientRegistration clientId (NE.head redirectsNE)
 
     let clientSecretNewtype = case mkClientSecret "" of
             Just cs -> cs

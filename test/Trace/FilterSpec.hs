@@ -1,6 +1,8 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
+{- HLINT ignore "Avoid partial function" -}
+
 {- |
 Module      : Trace.FilterSpec
 Description : Tests for trace filtering functionality
@@ -15,8 +17,9 @@ module Trace.FilterSpec (spec) where
 import Control.Monad.IO.Class (liftIO)
 import Data.Functor.Contravariant (contramap)
 import Data.IORef (modifyIORef', newIORef, readIORef)
+import Data.Maybe (fromJust)
+import Data.Text (Text)
 import MCP.Trace.HTTP (HTTPTrace (..))
-import MCP.Trace.OAuth (OAuthTrace (..))
 import MCP.Trace.Protocol (ProtocolTrace (..))
 import MCP.Trace.Server (ServerTrace (..))
 import MCP.Trace.StdIO (StdIOTrace (..))
@@ -30,14 +33,27 @@ import MCP.Trace.Types (
     isStdIOTrace,
  )
 import Plow.Logging (IOTracer (..), Tracer (..), filterTracer, traceWith)
+import Servant.OAuth2.IDP.Auth.Backend (Username, mkUsername)
+import Servant.OAuth2.IDP.Errors (ValidationError (..))
+import Servant.OAuth2.IDP.Trace (DenialReason (..), OAuthTrace (..), OperationResult (..))
+import Servant.OAuth2.IDP.Types (OAuthGrantType (..), mkClientId, mkRedirectUri)
 import Test.Hspec
+
+{- | Test helper: create username or fail with descriptive error
+This is safe for test cases with hardcoded valid usernames
+-}
+mkUsernameOrFail :: Text -> Username
+mkUsernameOrFail t = case mkUsername t of
+    Just u -> u
+    Nothing -> error $ "Test setup failed: invalid username: " ++ show t
 
 spec :: Spec
 spec = do
     describe "MCP.Trace.Types Filter Predicates" $ do
         describe "isOAuthTrace" $ do
             it "matches OAuth traces nested in HTTP" $ do
-                let trace = MCPHttp $ HTTPOAuth $ OAuthClientRegistration{clientId = "test", clientName = "Test"}
+                let redirectUri = fromJust $ mkRedirectUri "http://localhost/callback"
+                    trace = MCPHttp $ HTTPOAuth $ TraceClientRegistration (fromJust $ mkClientId "test") redirectUri
                 isOAuthTrace trace `shouldBe` True
 
             it "does not match non-OAuth HTTP traces" $ do
@@ -55,7 +71,7 @@ spec = do
                 isHTTPTrace trace `shouldBe` True
 
             it "matches HTTP traces with OAuth nested" $ do
-                let trace = MCPHttp $ HTTPOAuth $ OAuthTokenExchange{grantType = "authorization_code", success = True}
+                let trace = MCPHttp $ HTTPOAuth $ TraceTokenExchange OAuthAuthorizationCode Success
                 isHTTPTrace trace `shouldBe` True
 
             it "does not match other subsystem traces" $ do
@@ -106,15 +122,17 @@ spec = do
                 isErrorTrace (MCPHttp (HTTPAuthFailure{traceAuthReason = "Invalid token"})) `shouldBe` True
 
             it "matches OAuth error traces" $ do
-                isErrorTrace (MCPHttp (HTTPOAuth (OAuthAuthorizationDenied{clientId = "client-1", reason = "User denied"}))) `shouldBe` True
-                isErrorTrace (MCPHttp (HTTPOAuth (OAuthValidationError{errorType = "invalid_request", validationDetail = "Missing param"}))) `shouldBe` True
+                isErrorTrace (MCPHttp (HTTPOAuth (TraceAuthorizationDenied (fromJust $ mkClientId "client-1") UserDenied))) `shouldBe` True
+                let redirectUri = fromJust $ mkRedirectUri "https://wrong.com/callback"
+                isErrorTrace (MCPHttp (HTTPOAuth (TraceValidationError (RedirectUriMismatch (fromJust $ mkClientId "client-1") redirectUri)))) `shouldBe` True
 
             it "does not match non-error traces" $ do
                 isErrorTrace (MCPServer (ServerInit{serverName = "test", serverVersion = "1.0"})) `shouldBe` False
                 isErrorTrace (MCPProtocol (ProtocolRequestReceived{requestId = "req-1", method = "tools/list"})) `shouldBe` False
                 isErrorTrace (MCPStdIO (StdIOMessageReceived{messageSize = 100})) `shouldBe` False
                 isErrorTrace (MCPHttp (HTTPRequestReceived{tracePath = "/mcp", traceMethod = "POST", traceHasAuth = False})) `shouldBe` False
-                isErrorTrace (MCPHttp (HTTPOAuth (OAuthClientRegistration{clientId = "test", clientName = "Test"}))) `shouldBe` False
+                let redirectUri = fromJust $ mkRedirectUri "http://localhost/callback"
+                isErrorTrace (MCPHttp (HTTPOAuth (TraceClientRegistration (fromJust $ mkClientId "test") redirectUri))) `shouldBe` False
 
     describe "filterTracer integration (SC-006)" $ do
         it "filters to only OAuth traces from mixed events" $ do
@@ -127,12 +145,13 @@ spec = do
                 unIOTracer (IOTracer t) = t
 
             -- Emit mixed events (OAuth + HTTP + Protocol + Server)
-            traceWith oauthOnlyTracer $ MCPHttp $ HTTPOAuth $ OAuthClientRegistration{clientId = "client-1", clientName = "Test Client"}
+            let redirectUri1 = fromJust $ mkRedirectUri "http://localhost/callback"
+            traceWith oauthOnlyTracer $ MCPHttp $ HTTPOAuth $ TraceClientRegistration (fromJust $ mkClientId "client-1") redirectUri1
             traceWith oauthOnlyTracer $ MCPHttp $ HTTPRequestReceived{tracePath = "/mcp", traceMethod = "POST", traceHasAuth = False}
-            traceWith oauthOnlyTracer $ MCPHttp $ HTTPOAuth $ OAuthLoginAttempt{username = "demo", success = True}
+            traceWith oauthOnlyTracer $ MCPHttp $ HTTPOAuth $ TraceLoginAttempt (mkUsernameOrFail "demo") Success
             traceWith oauthOnlyTracer $ MCPProtocol $ ProtocolRequestReceived{requestId = "req-1", method = "tools/list"}
             traceWith oauthOnlyTracer $ MCPServer (ServerInit{serverName = "test", serverVersion = "1.0"})
-            traceWith oauthOnlyTracer $ MCPHttp $ HTTPOAuth $ OAuthTokenExchange{grantType = "authorization_code", success = True}
+            traceWith oauthOnlyTracer $ MCPHttp $ HTTPOAuth $ TraceTokenExchange OAuthAuthorizationCode Success
 
             -- Verify only OAuth traces appear (reverse to get chronological order)
             traces <- reverse <$> readIORef tracesRef
@@ -145,16 +164,16 @@ spec = do
             case traces of
                 [t1, t2, t3] -> do
                     case t1 of
-                        MCPHttp (HTTPOAuth OAuthClientRegistration{}) -> return ()
-                        _ -> expectationFailure "Expected OAuthClientRegistration"
+                        MCPHttp (HTTPOAuth TraceClientRegistration{}) -> return ()
+                        _ -> expectationFailure "Expected TraceClientRegistration"
 
                     case t2 of
-                        MCPHttp (HTTPOAuth OAuthLoginAttempt{}) -> return ()
-                        _ -> expectationFailure "Expected OAuthLoginAttempt"
+                        MCPHttp (HTTPOAuth TraceLoginAttempt{}) -> return ()
+                        _ -> expectationFailure "Expected TraceLoginAttempt"
 
                     case t3 of
-                        MCPHttp (HTTPOAuth OAuthTokenExchange{}) -> return ()
-                        _ -> expectationFailure "Expected OAuthTokenExchange"
+                        MCPHttp (HTTPOAuth TraceTokenExchange{}) -> return ()
+                        _ -> expectationFailure "Expected TraceTokenExchange"
                 _ -> expectationFailure "Expected exactly 3 OAuth traces"
 
         it "filters to only HTTP traces (including nested OAuth)" $ do
@@ -166,7 +185,8 @@ spec = do
             -- Emit mixed events
             traceWith httpOnlyTracer $ MCPHttp $ HTTPRequestReceived{tracePath = "/mcp", traceMethod = "POST", traceHasAuth = False}
             traceWith httpOnlyTracer $ MCPServer (ServerInit{serverName = "test", serverVersion = "1.0"})
-            traceWith httpOnlyTracer $ MCPHttp $ HTTPOAuth $ OAuthClientRegistration{clientId = "client-1", clientName = "Test"}
+            let redirectUri = fromJust $ mkRedirectUri "http://localhost/callback"
+            traceWith httpOnlyTracer $ MCPHttp $ HTTPOAuth $ TraceClientRegistration (fromJust $ mkClientId "client-1") redirectUri
             traceWith httpOnlyTracer $ MCPProtocol $ ProtocolRequestReceived{requestId = "req-1", method = "tools/list"}
             traceWith httpOnlyTracer $ MCPHttp $ HTTPAuthFailure{traceAuthReason = "Invalid token"}
 
@@ -216,11 +236,12 @@ spec = do
             -- Emit mixed events
             traceWith mcpTracer $ MCPHttp $ HTTPRequestReceived{tracePath = "/mcp", traceMethod = "POST", traceHasAuth = False}
             traceWith mcpTracer $ MCPServer (ServerInit{serverName = "test", serverVersion = "1.0"})
-            traceWith mcpTracer $ MCPHttp $ HTTPOAuth $ OAuthClientRegistration{clientId = "test", clientName = "Test"}
+            let redirectUri = fromJust $ mkRedirectUri "http://localhost/callback"
+            traceWith mcpTracer $ MCPHttp $ HTTPOAuth $ TraceClientRegistration (fromJust $ mkClientId "test") redirectUri
 
             -- Verify only HTTP traces were captured (and converted)
             traces <- reverse <$> readIORef tracesRef
             length traces `shouldBe` 2
             case traces of
-                [HTTPRequestReceived{}, HTTPOAuth OAuthClientRegistration{}] -> return ()
+                [HTTPRequestReceived{}, HTTPOAuth TraceClientRegistration{}] -> return ()
                 _ -> expectationFailure "Expected HTTPRequestReceived and HTTPOAuth traces"
