@@ -377,3 +377,10 @@ curl -i http://localhost:8080/mcp
 - **Networking**: network-uri
 - **Storage**: In-memory (TVar-based) by default; typeclass enables PostgreSQL/Redis backends
 - **Tracing**: User-provided IOTracer for structured trace emission
+
+## Active Technologies
+- Haskell GHC2021 (GHC 9.4+ via base ^>=4.18.2.1) + servant-server 0.19-0.20, servant-auth-server 0.4, aeson 2.1-2.2, jose 0.10-0.11, crypton, monad-time (006-servant-oauth2-idp-package)
+- In-memory (TVar-based via STM); typeclass abstraction for backends (006-servant-oauth2-idp-package)
+
+## Recent Changes
+- 006-servant-oauth2-idp-package: Added Haskell GHC2021 (GHC 9.4+ via base ^>=4.18.2.1) + servant-server 0.19-0.20, servant-auth-server 0.4, aeson 2.1-2.2, jose 0.10-0.11, crypton, monad-time
