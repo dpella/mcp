@@ -148,8 +148,8 @@ newtype ProgressToken = ProgressToken Value
     deriving newtype (ToJSON, FromJSON)
 
 -- | The severity of a log message
-data LoggingLevel = Alert | Critical | Debug | Emergency | Error | Info | Notice | Warning
-    deriving stock (Show, Eq, Generic)
+data LoggingLevel = Debug | Info | Notice | Warning | Error | Critical | Alert | Emergency
+    deriving stock (Show, Eq, Generic, Ord {- ^ Order from least to most severe -})
 
 instance ToJSON LoggingLevel where
     toJSON Alert = "alert"
