@@ -68,8 +68,10 @@ extra-source-files:
     schema.ts
     examples/README.md
     examples/http-server.hs
+    examples/stdio-server.hs
+    examples/cursor-config-examples.json
     examples/claude-desktop-config.json
-    examples/full-config-example.json
+    examples/claude-desktop-full-config.json
 
 tested-with:        GHC == 9.6.7
                      || == 9.8.4
