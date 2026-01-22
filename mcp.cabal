@@ -245,4 +245,4 @@ test-suite mcp-test
     -- Test dependencies.
     build-depends:
         base >= 4.18.2.1 && < 4.23,
-        mcp
+        -- mcp
