@@ -28,7 +28,7 @@ import Data.Map qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as T
 import GHC.Generics (Generic)
-import MCP
+import MCP.Server
 import Network.Wai (Application)
 import Servant (Context (..), Proxy (..), serveWithContext)
 import Servant.Auth.Server qualified as AuthServer

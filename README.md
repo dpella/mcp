@@ -1,10 +1,13 @@
-# DPella MCP — Model Context Protocol Server for Haskell
+# DPella MCP — Model Context Protocol for Haskell
 
-A complete implementation of the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) for Haskell, built on Servant and `servant-auth-server`.
+A complete implementation of the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) for Haskell, split into two packages:
+
+- **`mcp-protocol`** — Pure protocol types with minimal dependencies (aeson, base, containers, text)
+- **`mcp-server`** — Servant-based HTTP server with JWT authentication
 
 ## Overview
 
-This package provides a type-safe implementation of the Model Context Protocol in Haskell. MCP is an open protocol that standardizes how applications provide context to Large Language Models (LLMs), enabling AI models to securely connect to data sources and tools.
+This repository provides a type-safe implementation of the Model Context Protocol in Haskell. MCP is an open protocol that standardizes how applications provide context to Large Language Models (LLMs), enabling AI models to securely connect to data sources and tools.
 
 ## Features
 
@@ -18,26 +21,21 @@ This package provides a type-safe implementation of the Model Context Protocol i
 
 ## Architecture
 
-The implementation is organized into three main modules:
+The implementation is organized into two packages:
 
-### `MCP.Types`
-- Core MCP data types (Content, Resource, Tool, Prompt, Capability, etc.)
-- Automatic JSON serialization/deserialization via Aeson
-- Type-safe mapping of the complete MCP schema
+### `mcp-protocol`
 
-### `MCP.Protocol`
-- JSON-RPC 2.0 message wrappers (request, response, error, notification)
-- All client and server request/response types
-- Notification types for bidirectional communication
-- Union types for organizing related messages
-- Type classes `IsJSONRPCRequest` and `IsJSONRPCNotification` for generic serialization
+Core protocol types with minimal dependencies — suitable for building clients or alternative server implementations.
 
-### `MCP`
-- Core server infrastructure with `MCPServerT` monad transformer
-- `ProcessHandlers` record for implementing custom method handlers
-- `ToolHandler` framework for defining tools with metadata and handlers
-- JWT-authenticated Servant API at the `/mcp` endpoint
-- Server state management and request routing
+- **`MCP.Types`**: Core MCP data types (Content, Resource, Tool, Prompt, Capability, etc.)
+- **`MCP.Protocol`**: JSON-RPC 2.0 message wrappers, all client/server request/response types, notification types
+- **`MCP.Aeson`**: Custom Aeson parsing options
+
+### `mcp-server`
+
+Servant-based server implementation. Re-exports `MCP.Protocol` and `MCP.Types` for convenience.
+
+- **`MCP.Server`**: Core server infrastructure with `MCPServerT` monad transformer, `ProcessHandlers` record, `ToolHandler` framework, JWT-authenticated Servant API, server state management and request routing
 
 ## MCP Protocol Support
 
@@ -62,7 +60,7 @@ The implementation is organized into three main modules:
 
 ## Install
 
-Add the package to your `build-depends`:
+For a server implementation, add `mcp-server` to your `build-depends`:
 
 ```cabal
 build-depends:
@@ -71,7 +69,16 @@ build-depends:
   , servant-server
   , servant-auth-server
   , aeson
-  , mcp
+  , mcp-server
+```
+
+If you only need the protocol types (e.g. for a client), depend on `mcp-protocol` instead:
+
+```cabal
+build-depends:
+    base
+  , aeson
+  , mcp-protocol
 ```
 
 This project targets GHC 9.12 (see `cabal.project`).
@@ -84,7 +91,7 @@ This project targets GHC 9.12 (see `cabal.project`).
 {-# LANGUAGE TypeFamilies #-}
 
 import Control.Concurrent.MVar (newMVar)
-import MCP
+import MCP.Server
 
 -- Define your handler state and user types
 type instance MCPHandlerState = ()
@@ -116,26 +123,30 @@ myTools =
 ## Project Structure
 
 ```
-src/
-├── MCP.hs               # Server infrastructure and Servant API
-└── MCP/
-    ├── Aeson.hs          # Custom Aeson parsing options
-    ├── Protocol.hs       # JSON-RPC protocol messages
-    └── Types.hs          # Core MCP data types
+mcp-protocol/               # Core protocol types package
+├── src/MCP/
+│   ├── Aeson.hs             # Custom Aeson parsing options
+│   ├── Protocol.hs          # JSON-RPC protocol messages
+│   └── Types.hs             # Core MCP data types
+└── mcp-protocol.cabal
 
-test/
-├── Main.hs              # Test entry point
-└── MCP/
-    ├── Integration.hs    # Integration tests (hspec-wai)
-    ├── TestServer.hs     # Test server configuration
-    └── TestUtils.hs      # Test utilities and request builders
+mcp-server/                  # Server implementation package
+├── src/MCP/
+│   └── Server.hs            # Server infrastructure and Servant API
+├── test/
+│   ├── Main.hs              # Test entry point
+│   └── MCP/
+│       ├── Integration.hs   # Integration tests (hspec-wai)
+│       ├── TestServer.hs    # Test server configuration
+│       └── TestUtils.hs     # Test utilities and request builders
+└── mcp-server.cabal
 ```
 
 ## Development
 
 ```bash
-cabal build
-cabal test
+cabal build all
+cabal test all
 ```
 
 ## License

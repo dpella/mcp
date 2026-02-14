@@ -1,3 +1,3 @@
 #! /usr/bin/bash
 
-cabal test test-mcp
+cabal test test-mcp-server

@@ -74,7 +74,7 @@ RUN curl -fsSL https://get-ghcup.haskell.org -o /tmp/get-ghcup.sh && \
 
 # We copy only the cabal files, since these won't change usually. This lets us avoid
 # rebuilding the dependencies all the time.
-COPY --parents --chown=${UID}:${GID} *.cabal /app/
+COPY --parents --chown=${UID}:${GID} */*.cabal /app/
 COPY --chown=${UID}:${GID} cabal.project /app/cabal.project
 
 WORKDIR /app
@@ -83,8 +83,9 @@ RUN --mount=type=cache,id=mcp-build-cache,uid=${UID},gid=${GID},target=/app/dist
     cabal update && \
     cabal build all --only-dependencies --haddock-all --project-file=cabal.project --project-dir=/app
 
-COPY --link --chown=${UID}:${GID} src /app/src
-COPY --link --chown=${UID}:${GID} test /app/test
+COPY --link --chown=${UID}:${GID} mcp-protocol/src /app/mcp-protocol/src
+COPY --link --chown=${UID}:${GID} mcp-server/src /app/mcp-server/src
+COPY --link --chown=${UID}:${GID} mcp-server/test /app/mcp-server/test
 
 # Build all the packages
 RUN --mount=type=cache,id=mcp-build-cache,uid=${UID},gid=${GID},target=/app/dist-newstyle \

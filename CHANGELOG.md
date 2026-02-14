@@ -1,8 +1,23 @@
 # Changelog
 
-# 0.1.0.0
-## Added
-- Initial release extracted from `dpella-server` as a standalone package.
+## 0.2.0.0 — Package Split
+
+### Changed
+- **Breaking**: Split `mcp` into two packages:
+  - `mcp-protocol`: Core protocol types (`MCP.Types`, `MCP.Protocol`, `MCP.Aeson`) with minimal dependencies.
+  - `mcp-server`: Servant-based server (`MCP.Server`) depending on `mcp-protocol`.
+- The `MCP` module has been renamed to `MCP.Server`.
+- `MCP.Aeson` is now an exposed module in `mcp-protocol` (was `other-modules`).
+
+### Migration
+1. Replace `mcp` with `mcp-server` in your `build-depends`.
+2. Change `import MCP` to `import MCP.Server`.
+3. If you only need types, depend on `mcp-protocol` instead.
+
+## 0.1.0.0
+
+### Added
+- Initial release.
 - JSON-RPC 2.0 protocol layer for MCP (`MCP.Protocol`).
 - Core MCP types: resources, tools, prompts, capabilities, and content types (`MCP.Types`).
 - MCP server implementation with JWT authentication, request routing, and handler framework (`MCP`).

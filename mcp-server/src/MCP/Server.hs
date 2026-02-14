@@ -8,7 +8,7 @@
 {-# LANGUAGE TypeOperators #-}
 
 {- |
-Module:      MCP
+Module:      MCP.Server
 Copyright:   (c) DPella AB 2025
 License:     MPL-2.0
 Maintainer:  <matti@dpella.io>, <lobo@dpella.io>
@@ -27,7 +27,7 @@ The MCP server provides:
 Authentication is handled via JWT tokens in the Authorization header.
 The server maintains a REPL state for each authenticated session.
 -}
-module MCP (
+module MCP.Server (
     -- * Processing results
     ProcessResult (..),
 

@@ -1,5 +1,5 @@
 cabal-version: 2.2
-name: mcp
+name: mcp-server
 version: 0.1.0.0
 license: MPL-2.0
 license-file: LICENSE
@@ -8,27 +8,26 @@ author: DPella AB
 tested-with: ghc ==9.12.2
 extra-doc-files:
   CHANGELOG.md
-  README.md
 
 maintainer:
   matti@dpella.io,
   lobo@dpella.io
 
-synopsis: A Haskell implementation of the Model Context Protocol (MCP)
+synopsis: A Servant-based Model Context Protocol (MCP) server for Haskell
 description:
-  This library provides a complete implementation of the Model Context Protocol
-  (MCP) for Haskell. MCP is a protocol that enables seamless communication
-  between AI models and external tools, resources, and services. This
-  implementation supports MCP protocol version 2025-06-18 with full
-  compatibility for resources, tools, prompts, completions, elicitation, and all
-  standard MCP message types. It provides both a server framework and type
-  definitions for building MCP-compliant applications.
+  This library provides a complete server implementation of the Model Context
+  Protocol (MCP) for Haskell, built on Servant with JWT authentication via
+  @servant-auth-server@. It re-exports the core protocol types from
+  @mcp-protocol@ for convenience.
   .
-  The server is built on Servant with JWT authentication via
-  @servant-auth-server@ and uses HTTP transport with streaming SSE responses at
-  the @/mcp@ endpoint. An extensible handler framework (@ProcessHandlers@,
-  @ToolHandler@) allows implementing custom MCP servers with minimal
-  boilerplate.
+  MCP is a protocol that enables seamless communication between AI models and
+  external tools, resources, and services. This implementation supports MCP
+  protocol version 2025-06-18 with full compatibility for resources, tools,
+  prompts, completions, elicitation, and all standard MCP message types.
+  .
+  The server uses HTTP transport with streaming SSE responses at the @/mcp@
+  endpoint. An extensible handler framework (@ProcessHandlers@, @ToolHandler@)
+  allows implementing custom MCP servers with minimal boilerplate.
 
 homepage: https://github.com/DPella/mcp
 bug-reports: https://github.com/DPella/mcp/issues
@@ -59,12 +58,7 @@ library
     src
 
   exposed-modules:
-    MCP
-    MCP.Protocol
-    MCP.Types
-
-  other-modules:
-    MCP.Aeson
+    MCP.Server
 
   build-depends:
     aeson >=2.1 && <2.3,
@@ -72,6 +66,7 @@ library
     bytestring >=0.11 && <0.13,
     containers >=0.6 && <0.8,
     http-media >=0.8 && <0.9,
+    mcp-protocol,
     mtl >=2.2 && <2.4,
     servant >=0.19 && <0.21,
     servant-auth-server >=0.4 && <0.5,
@@ -79,7 +74,7 @@ library
     text >=2.0 && <2.2,
     time >=1.12 && <1.15,
 
-test-suite test-mcp
+test-suite test-mcp-server
   type: exitcode-stdio-1.0
   default-language:
     Haskell2010
@@ -117,7 +112,8 @@ test-suite test-mcp
     hspec-wai >=0.11 && <0.12,
     http-types >=0.12 && <0.13,
     jose >=0.10 && <0.12,
-    mcp,
+    mcp-protocol,
+    mcp-server,
     mtl >=2.2 && <2.4,
     servant >=0.19 && <0.21,
     servant-auth-server >=0.4 && <0.5,

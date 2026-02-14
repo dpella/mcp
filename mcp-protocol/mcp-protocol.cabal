@@ -1,0 +1,63 @@
+cabal-version: 2.2
+name: mcp-protocol
+version: 0.1.0.0
+license: MPL-2.0
+license-file: LICENSE
+copyright: (c) 2025 DPella AB
+author: DPella AB
+tested-with: ghc ==9.12.2
+extra-doc-files:
+  CHANGELOG.md
+
+maintainer:
+  matti@dpella.io,
+  lobo@dpella.io
+
+synopsis: Core types and protocol definitions for the Model Context Protocol (MCP)
+description:
+  This library provides the core type definitions and JSON-RPC protocol layer
+  for the Model Context Protocol (MCP). MCP is a protocol that enables seamless
+  communication between AI models and external tools, resources, and services.
+  .
+  This package contains only the pure protocol types with minimal dependencies,
+  making it suitable for building both clients and servers on any framework.
+  For a ready-made Servant-based server, see the @mcp-server@ package.
+
+homepage: https://github.com/DPella/mcp
+bug-reports: https://github.com/DPella/mcp/issues
+category: Web, AI
+
+source-repository head
+  type: git
+  location: https://github.com/DPella/mcp.git
+
+library
+  default-language:
+    Haskell2010
+
+  default-extensions:
+    DataKinds
+    FlexibleInstances
+    GADTs
+    GeneralizedNewtypeDeriving
+    ImportQualifiedPost
+    LambdaCase
+    OverloadedStrings
+    PolyKinds
+    RankNTypes
+    TypeApplications
+    TypeFamilies
+
+  hs-source-dirs:
+    src
+
+  exposed-modules:
+    MCP.Aeson
+    MCP.Protocol
+    MCP.Types
+
+  build-depends:
+    aeson >=2.1 && <2.3,
+    base >=4.18 && <4.22,
+    containers >=0.6 && <0.8,
+    text >=2.0 && <2.2,
