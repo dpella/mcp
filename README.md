@@ -85,10 +85,6 @@ This project targets GHC 9.12 (see `cabal.project`).
 
 import Control.Concurrent.MVar (newMVar)
 import MCP
-import MCP.Protocol
-import MCP.Types
-import Servant
-import Servant.Auth.Server
 
 -- Define your handler state and user types
 type instance MCPHandlerState = ()
@@ -99,20 +95,20 @@ mkServerState :: IO (MVar MCPServerState)
 mkServerState = do
   let impl = Implementation "my-server" "1.0.0" Nothing
       caps = ServerCapabilities
-        { logging   = Nothing
-        , prompts   = Nothing
-        , resources = Nothing
-        , tools     = Just (ToolsCapability (Just True))
+        { logging      = Nothing
+        , prompts      = Nothing
+        , resources    = Nothing
+        , tools        = Just (ToolsCapability { listChanged = Just True })
         , completions  = Nothing
         , experimental = Nothing
         }
-  newMVar $ initMCPServerState () Nothing Nothing caps impl Nothing
-    $ withToolHandlers myTools defaultProcessHandlers
+      handlers = withToolHandlers myTools defaultProcessHandlers
+  newMVar $ initMCPServerState () Nothing Nothing caps impl Nothing handlers
 
 -- Define tools using the ToolHandler framework
 myTools :: [ToolHandler]
 myTools =
-  [ toolHandler "greet" (Just "Say hello") greetSchema $ \args ->
+  [ toolHandler "greet" (Just "Say hello") greetSchema $ \_args ->
       return $ ProcessSuccess $ toolTextResult ["Hello!"]
   ]
 ```

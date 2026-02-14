@@ -23,7 +23,7 @@ This repository implements a Model Context Protocol (MCP) server as a Haskell li
 - Imports: qualified where helpful; group stdlib/external/local; avoid unused imports.
 
 ## Testing Guidelines
-- Frameworks: `hspec`, `hspec-wai`, `tasty`, `tasty-hunit`.
+- Frameworks: `hspec`, `hspec-wai`.
 - Place tests under `test/MCP/*`; add to `other-modules` in `mcp.cabal` if needed.
 - Aim to cover new endpoints/branches; prefer integration tests for protocol flows.
 - Run `cabal test` before submitting; keep tests deterministic and hermetic (no network).
