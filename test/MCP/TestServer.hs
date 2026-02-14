@@ -13,7 +13,7 @@
 {- |
 Module:      MCP.TestServer
 Copyright:   (c) DPella AB 2025
-License:     LicenseRef-AllRightsReserved
+License:     MPL-2.0
 Maintainer:  <matti@dpella.io>, <lobo@dpella.io>
 
 This module provides server configuration utilities for testing the MCP server
@@ -29,8 +29,6 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import GHC.Generics (Generic)
 import MCP
-import MCP.Protocol
-import MCP.Types
 import Network.Wai (Application)
 import Servant (Context (..), Proxy (..), serveWithContext)
 import Servant.Auth.Server qualified as AuthServer

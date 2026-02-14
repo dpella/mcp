@@ -21,7 +21,7 @@
 Module      : MCP.Protocol
 Description : JSON-RPC protocol implementation for MCP
 Copyright   : (C) 2025 Matthias Pall Gissurarson
-License     : MIT
+License     : MPL-2.0
 Maintainer  : mpg@mpg.is
 Stability   : experimental
 Portability : GHC
@@ -1176,7 +1176,7 @@ of prompts it offers has changed.
 This may be issued by servers without any previous subscription from the client.
 -}
 data PromptListChangedNotification = PromptListChangedNotification
-    { params :: Maybe EmptyParams -- this should probably not be initialized params
+    { params :: Maybe EmptyParams
     }
     deriving stock (Show, Eq, Generic)
     deriving (ToJSON, FromJSON) via ViaJSONRPCNotification PromptListChangedNotification

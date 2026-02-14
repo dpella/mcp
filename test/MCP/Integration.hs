@@ -9,7 +9,7 @@
 {- |
 Module:      MCP.Integration
 Copyright:   (c) DPella AB 2025
-License:     LicenseRef-AllRightsReserved
+License:     MPL-2.0
 Maintainer:  <matti@dpella.io>, <lobo@dpella.io>
 
 Integration tests for Model Context Protocol (MCP) server implementation

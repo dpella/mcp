@@ -8,7 +8,7 @@
 {- |
 Module:      MCP.TestUtils
 Copyright:   (c) DPella AB 2025
-License:     LicenseRef-AllRightsReserved
+License:     MPL-2.0
 Maintainer:  <matti@dpella.io>, <lobo@dpella.io>
 
 This module provides utility functions and types for testing the MCP server

@@ -4,7 +4,7 @@
 {- |
 Module:      Main
 Copyright:   (c) DPella AB 2025
-License:     LicenseRef-AllRightsReserved
+License:     MPL-2.0
 Maintainer:  <matti@dpella.io>, <lobo@dpella.io>
 
 Main test suite for the MCP library

@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
@@ -9,7 +10,7 @@
 {- |
 Module:      MCP
 Copyright:   (c) DPella AB 2025
-License:     LicenseRef-AllRightsReserved
+License:     MPL-2.0
 Maintainer:  <matti@dpella.io>, <lobo@dpella.io>
 
 Model Context Protocol (MCP) server implementation for DPella.
@@ -26,7 +27,42 @@ The MCP server provides:
 Authentication is handled via JWT tokens in the Authorization header.
 The server maintains a REPL state for each authenticated session.
 -}
-module MCP where
+module MCP (
+    -- * Processing results
+    ProcessResult (..),
+
+    -- * Server monad
+    MCPServerT,
+
+    -- * Handlers
+    ProcessHandlers (..),
+    defaultProcessHandlers,
+
+    -- * Tool helpers
+    ToolHandler (..),
+    toolHandler,
+    withToolHandlers,
+    toolTextResult,
+    toolTextError,
+
+    -- * Server state
+    MCPServerState (..),
+    initMCPServerState,
+
+    -- * Type families
+    MCPHandlerState,
+    MCPHandlerUser,
+
+    -- * Servant API
+    MCPAPI,
+    mcpAPI,
+    handleMCPRequest,
+    handleMCPEvents,
+
+    -- * Re-exports
+    module MCP.Protocol,
+    module MCP.Types,
+) where
 
 import Control.Concurrent.MVar
 import Control.Monad (unless, when)
@@ -267,10 +303,16 @@ initMCPServerState ::
 initMCPServerState init_state handler_init handler_finalize =
     MCPServerState False init_state handler_init handler_finalize Nothing (Just Warning) IM.empty 0
 
--- | Type family used to configure the state used for the MCPHandlers
+{- | Type family used to configure the handler state threaded through 'MCPServerT'.
+Users must provide a type instance before using the MCP server, e.g.
+@type instance MCPHandlerState = MyState@.
+-}
 type family MCPHandlerState
 
--- | Type family to configure the users
+{- | Type family used to configure the user type for JWT authentication.
+Users must provide a type instance before using the MCP server, e.g.
+@type instance MCPHandlerUser = MyUser@.
+-}
 type family MCPHandlerUser
 
 {- | MCP server state maintained across requests.

@@ -10,7 +10,7 @@
 Module      : MCP.Types
 Description : Core types for the Model Context Protocol (MCP)
 Copyright   : (C) 2025 Matthias Pall Gissurarson
-License     : MIT
+License     : MPL-2.0
 Maintainer  : mpg@mpg.is
 Stability   : experimental
 Portability : GHC
