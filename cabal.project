@@ -1,6 +1,6 @@
 packages:
   mcp-protocol/mcp-protocol.cabal
-  mcp-server/mcp-server.cabal
+  mcp-server/mcp.cabal
 
 -- oauth-server is not on hackage yet
 packages: ../oauth-server/*.cabal

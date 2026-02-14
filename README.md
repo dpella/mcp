@@ -3,7 +3,7 @@
 A complete implementation of the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) for Haskell, split into two packages:
 
 - **`mcp-protocol`** — Pure protocol types with minimal dependencies (aeson, base, containers, text)
-- **`mcp-server`** — Servant-based HTTP server with JWT authentication
+- **`mcp`** — Servant-based HTTP server with JWT authentication
 
 ## Overview
 
@@ -31,7 +31,7 @@ Core protocol types with minimal dependencies — suitable for building clients 
 - **`MCP.Protocol`**: JSON-RPC 2.0 message wrappers, all client/server request/response types, notification types
 - **`MCP.Aeson`**: Custom Aeson parsing options
 
-### `mcp-server`
+### `mcp`
 
 Servant-based server implementation. Re-exports `MCP.Protocol` and `MCP.Types` for convenience.
 
@@ -60,7 +60,7 @@ Servant-based server implementation. Re-exports `MCP.Protocol` and `MCP.Types` f
 
 ## Install
 
-For a server implementation, add `mcp-server` to your `build-depends`:
+For a server implementation, add `mcp` to your `build-depends`:
 
 ```cabal
 build-depends:
@@ -69,7 +69,7 @@ build-depends:
   , servant-server
   , servant-auth-server
   , aeson
-  , mcp-server
+  , mcp
 ```
 
 If you only need the protocol types (e.g. for a client), depend on `mcp-protocol` instead:
@@ -130,7 +130,7 @@ mcp-protocol/               # Core protocol types package
 │   └── Types.hs             # Core MCP data types
 └── mcp-protocol.cabal
 
-mcp-server/                  # Server implementation package
+mcp/                  # Server implementation package
 ├── src/MCP/
 │   └── Server.hs            # Server infrastructure and Servant API
 ├── test/
@@ -139,7 +139,7 @@ mcp-server/                  # Server implementation package
 │       ├── Integration.hs   # Integration tests (hspec-wai)
 │       ├── TestServer.hs    # Test server configuration
 │       └── TestUtils.hs     # Test utilities and request builders
-└── mcp-server.cabal
+└── mcp.cabal
 ```
 
 ## Development
