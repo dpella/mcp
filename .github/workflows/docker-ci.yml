@@ -1,0 +1,82 @@
+name: Docker CI
+
+on:
+  push:
+    branches:
+      - main
+      - docker-ci
+    tags:
+      - '**'
+  pull_request:
+    types:
+      # We want to build when a draft branch is marked ready
+      - ready_for_review
+      # Default types
+      - opened
+      - reopened
+      - synchronize
+  workflow_dispatch:
+
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+
+    - name: Checkout project
+      uses: actions/checkout@v4
+
+    # Dockerfile linting
+    - name: Hadolint
+      uses: hadolint/hadolint-action@v3.1.0
+      with:
+        dockerfile: Dockerfile
+
+    # Allows better caching of layers
+    - name: Set up Buildx
+      uses: docker/setup-buildx-action@v3
+
+
+    - name: Log in to the Container registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata for Docker
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ghcr.io/dpella/mcp
+        tags: |
+          type=ref,event=branch,branch=main
+          type=ref,event=tag
+          type=sha
+
+    # Single build step; push only when on main
+    - name: Build (and conditionally push) base Docker image
+      if: github.event.pull_request.draft == false
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        file: Dockerfile
+        pull: true
+        push: ${{ github.event_name == 'push' && (startsWith(github.ref, 'refs/heads/main') || startsWith(github.ref, 'refs/tags/')) }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        load: true
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Run in-docker tests
+      if: github.event.pull_request.draft == false
+      run: |
+       docker run --rm -t \
+         $(echo "${{ steps.meta.outputs.tags }}" | tail -n1) \
+         scripts/test-in-docker.sh

@@ -1,0 +1,106 @@
+cabal-version:      2.2
+name:               mcp
+version:            0.1.0.0
+license:            MPL-2.0
+license-file:       LICENSE
+author:             DPella AB
+extra-doc-files:    CHANGELOG.md, README.md
+maintainer:         matti@dpella.io,
+                    lobo@dpella.io
+synopsis:           Model Context Protocol server implementation
+description:
+  Provides a Servant-based implementation of the Model Context Protocol (MCP),
+  allowing AI assistants and other tools to interact with services through a
+  standardized JSON-RPC interface. The package supports resource access, tool
+  execution, prompt templates, and completion support, with JWT-based
+  authentication via @servant-auth-server@.
+homepage:          https://github.com/DPella/mcp
+bug-reports:       https://github.com/DPella/mcp/issues
+category:          Web, AI
+
+source-repository head
+  type:     git
+  location: https://github.com/DPella/mcp.git
+
+library
+  default-language:
+    Haskell2010
+  default-extensions:
+      DataKinds
+    , FlexibleInstances
+    , GADTs
+    , GeneralizedNewtypeDeriving
+    , ImportQualifiedPost
+    , LambdaCase
+    , OverloadedStrings
+    , PolyKinds
+    , RankNTypes
+    , TypeApplications
+    , TypeFamilies
+  hs-source-dirs:
+    src
+  exposed-modules:
+    MCP
+    MCP.Protocol
+    MCP.Types
+  other-modules:
+    MCP.Aeson
+  build-depends:
+      aeson
+    , base >=4.18 && <4.22
+    , bytestring
+    , containers
+    , http-media
+    , mtl
+    , servant
+    , servant-auth-server
+    , servant-server
+    , text
+    , time
+
+
+test-suite test-mcp
+  type: exitcode-stdio-1.0
+  default-language:
+    Haskell2010
+  default-extensions:
+      DataKinds
+    , FlexibleInstances
+    , GADTs
+    , GeneralizedNewtypeDeriving
+    , ImportQualifiedPost
+    , LambdaCase
+    , OverloadedStrings
+    , PolyKinds
+    , RankNTypes
+    , TypeApplications
+  hs-source-dirs:
+    test
+  main-is:
+    Main.hs
+  other-modules:
+    MCP.Integration
+    MCP.TestServer
+    MCP.TestUtils
+  build-depends:
+      aeson
+    , attoparsec
+    , base >=4.18 && <4.22
+    , bytestring
+    , containers
+    , hspec
+    , hspec-wai
+    , http-types
+    , jose
+    , mcp
+    , mtl
+    , servant
+    , servant-auth-server
+    , servant-server
+    , tasty
+    , tasty-hunit
+    , text
+    , time
+    , wai
+    , wai-extra
+    , wai-test

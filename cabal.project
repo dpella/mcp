@@ -1,0 +1,27 @@
+packages: mcp.cabal
+
+-- oauth-server is not on hackage yet
+packages: ../oauth-server/*.cabal
+
+-- GHC version
+with-compiler: ghc-9.12.2
+-- Constrain jose to <0.12 for servant-auth-server compat
+constraints: jose < 0.12
+-- Optimization level
+optimization: 2
+
+-- Build tests, benchmarks, and documentation by default
+tests:      True
+benchmarks: True
+documentation: True
+
+-- Global compiler options
+program-options
+
+  -- Default warning flags
+  ghc-options:
+    -Wall
+    -Werror
+    -Wno-unticked-promoted-constructors
+
+  ghc-options:
