@@ -85,6 +85,7 @@ RUN --mount=type=cache,id=mcp-build-cache,uid=${UID},gid=${GID},target=/app/dist
     cabal build all --only-dependencies --haddock-all --project-file=cabal.project --project-dir=/app
 
 COPY --link --chown=${UID}:${GID} mcp-types/src /app/mcp-types/src
+COPY --link --chown=${UID}:${GID} mcp-types/test /app/mcp-types/test
 COPY --link --chown=${UID}:${GID} mcp-server/src /app/mcp-server/src
 COPY --link --chown=${UID}:${GID} mcp-server/test /app/mcp-server/test
 COPY --link --chown=${UID}:${GID} mcp-server/example/Main.hs /app/mcp-server/example/Main.hs
@@ -98,7 +99,7 @@ COPY --link --chown=${UID}:${GID} mcp-types/CHANGELOG.md mcp-types/README.md mcp
 COPY --link --chown=${UID}:${GID} mcp-server/CHANGELOG.md mcp-server/README.md mcp-server/LICENSE /app/mcp-server/
 
 RUN --mount=type=cache,id=mcp-build-cache,uid=${UID},gid=${GID},target=/app/dist-newstyle \
-     cabal haddock --haddock-for-hackage --project-file=cabal.project --project-dir=/app  && \
+     cabal haddock all --haddock-for-hackage --project-file=cabal.project --project-dir=/app  && \
      cabal test all --enable-tests --project-file=cabal.project --project-dir=/app
 
 COPY --link --chown=${UID}:${GID} scripts /app/scripts
