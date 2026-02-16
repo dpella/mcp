@@ -65,7 +65,7 @@ module MCP.Server (
 ) where
 
 import Control.Concurrent.MVar
-import Control.Monad (unless, when)
+import Control.Monad (when)
 import Control.Monad.Except
 import Control.Monad.State.Lazy
 import Data.Aeson (Value, encode, fromJSON, object, toJSON, (.=))
@@ -80,6 +80,7 @@ import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Text.Encoding (encodeUtf8)
 import Data.Tuple (swap)
 import MCP.Protocol
 import MCP.Types
@@ -153,6 +154,10 @@ data ProcessHandlers
     -- ^ List resource templates
     , completeHandler :: Maybe (CompleteParams -> MCPServerT (ProcessResult CompleteResult))
     -- ^ Provide completions
+    , subscribeHandler :: Maybe (SubscribeParams -> MCPServerT (ProcessResult Result))
+    -- ^ Subscribe to resource updates
+    , unsubscribeHandler :: Maybe (UnsubscribeParams -> MCPServerT (ProcessResult Result))
+    -- ^ Unsubscribe from resource updates
     }
 
 -- | A ToolHandler, including the name, description, and input schema.
@@ -268,6 +273,8 @@ as needed for your MCP server implementation.
 defaultProcessHandlers :: ProcessHandlers
 defaultProcessHandlers =
     ProcessHandlers
+        Nothing
+        Nothing
         Nothing
         Nothing
         Nothing
@@ -434,19 +441,6 @@ handleMCPRequest state_var auth_result request_value =
                     Just level -> when (level >= Debug) $ do
                         liftIO $ BSL.putStrLn $ encode request_value
 
-                unless server_initialized $ do
-                    liftIO $
-                        modifyMVar_ state_var $
-                            \cur_st@MCPServerState
-                                { mcp_handler_state = handler_st
-                                , mcp_handler_init = mb_handler_init
-                                } -> case mb_handler_init of
-                                    Nothing -> return cur_st
-                                    Just handler_init -> do
-                                        -- Call the init handler to update the state
-                                        h_st' <- handler_init auth_user handler_st
-                                        return cur_st{mcp_handler_state = h_st'}
-
                 case request_value of
                     NotificationMessage _ ->
                         return $
@@ -471,13 +465,26 @@ handleMCPRequest state_var auth_result request_value =
                                         return Stop
                     RequestMessage (JSONRPCRequest jsonrpc req_id method params) -> do
                         -- Validate JSON-RPC version
-                        let bs_rpc_version = BSL.pack (T.unpack rPC_VERSION)
+                        let bs_rpc_version = BSL.fromStrict (encodeUtf8 rPC_VERSION)
                         when (jsonrpc /= rPC_VERSION) $
                             throwError err400{errBody = "Invalid jsonrpc version, must be '" <> bs_rpc_version <> "'"}
 
                         -- Validate request ID
                         when (not $ isValidRequestId req_id) $
                             throwError err400{errBody = "Invalid request ID, must be string, number, or null"}
+
+                        -- Initialize handler state on first initialize request
+                        when (not server_initialized && method == "initialize") $
+                            liftIO $
+                                modifyMVar_ state_var $
+                                    \cur_st@MCPServerState
+                                        { mcp_handler_state = handler_st
+                                        , mcp_handler_init = mb_handler_init
+                                        } -> case mb_handler_init of
+                                            Nothing -> return cur_st
+                                            Just handler_init -> do
+                                                h_st' <- handler_init auth_user handler_st
+                                                return cur_st{mcp_handler_state = h_st'}
 
                         -- Process the request routing to the appropriate handler
                         res <- liftIO $ modifyMVar state_var $ fmap swap <$> runStateT (process server_initialized method params)
@@ -590,9 +597,11 @@ handleMCPRequest state_var auth_result request_value =
     -- Main processing function routing to handlers
     process :: Bool -> Text -> Aeson.Value -> StateT MCPServerState IO (ProcessResult Aeson.Value)
     process False mthd _ | not $ mthd `Set.member` allowed_without_initialization = server_not_initialized
-    process msi mthd Aeson.Null | allowed_without_params mthd = process msi mthd (object [])
+    process _ mthd Aeson.Null | allowed_without_params mthd = process True mthd (object [])
     process _ "resources/list" mb_arg = runProcessHandler listResourcesHandler mb_arg
     process _ "resources/read" mb_arg = runProcessHandler readResourceHandler mb_arg
+    process _ "resources/subscribe" mb_arg = runProcessHandler subscribeHandler mb_arg
+    process _ "resources/unsubscribe" mb_arg = runProcessHandler unsubscribeHandler mb_arg
     process _ "tools/list" mb_arg = runProcessHandler listToolsHandler mb_arg
     process _ "tools/call" mb_arg = runProcessHandler callToolHandler mb_arg
     process _ "prompts/list" mb_arg = runProcessHandler listPromptsHandler mb_arg

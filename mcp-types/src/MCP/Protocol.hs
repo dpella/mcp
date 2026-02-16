@@ -20,9 +20,9 @@
 {- |
 Module      : MCP.Protocol
 Description : JSON-RPC protocol implementation for MCP
-Copyright   : (C) 2025 Matthias Pall Gissurarson
+Copyright   : (C) 2025 DPella AB
 License     : MPL-2.0
-Maintainer  : mpg@mpg.is
+Maintainer  : matti@dpella.io, lobo@dpella.io
 Stability   : experimental
 Portability : GHC
 
@@ -308,7 +308,7 @@ type family NotificationParamType (rep :: Type -> Type) :: Type where
     NotificationParamType (D1 ('MetaData nm _ _ _) _) =
         TypeError
             ( ('Text "Error when defining IsJSONRPCNotification for " :<>: 'Text nm :<>: 'Text ":")
-                :$$: 'Text "The notification datatype must be a record with fields 'id' and 'params'"
+                :$$: 'Text "The notification datatype must be a record with a single field 'params'"
             )
 
 -- | A type class for types that can be converted to/from JSON-RPC requests.
