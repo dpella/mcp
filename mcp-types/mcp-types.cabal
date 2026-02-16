@@ -62,3 +62,35 @@ library
     containers >=0.6 && <0.8,
     jsonrpc >=0.2.0 && <0.3,
     text >=2.0 && <2.2,
+
+test-suite test-mcp-types
+  type: exitcode-stdio-1.0
+  default-language:
+    Haskell2010
+
+  default-extensions:
+    DataKinds
+    FlexibleInstances
+    GADTs
+    GeneralizedNewtypeDeriving
+    ImportQualifiedPost
+    LambdaCase
+    OverloadedStrings
+    PolyKinds
+    RankNTypes
+    TypeApplications
+    TypeFamilies
+
+  hs-source-dirs:
+    test
+
+  main-is:
+    Main.hs
+
+  build-depends:
+    aeson >=2.1 && <2.3,
+    base >=4.18 && <4.22,
+    containers >=0.6 && <0.8,
+    hspec >=2.10 && <2.12,
+    jsonrpc >=0.2.0 && <0.3,
+    mcp-types,
