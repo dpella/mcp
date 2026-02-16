@@ -13,7 +13,6 @@
 {- |
 Module      : MCP.Protocol
 Description : MCP protocol types built on JSON-RPC 2.0
-Copyright   : (C) 2025 DPella AB
 License     : MPL-2.0
 Maintainer  : matti@dpella.io, lobo@dpella.io
 Stability   : experimental
@@ -106,6 +105,7 @@ module MCP.Protocol (
 
     -- * MCP Constants
     pROTOCOL_VERSION,
+    sERVER_NOT_INITIALIZED,
 ) where
 
 import Control.Applicative ((<|>))
@@ -1119,6 +1119,10 @@ that this implementation supports.
 -}
 pROTOCOL_VERSION :: Text
 pROTOCOL_VERSION = "2025-06-18"
+
+-- | JSON-RPC error code for requests received before the server has been initialized (-32002).
+sERVER_NOT_INITIALIZED :: Int
+sERVER_NOT_INITIALIZED = -32002
 
 {- | Primitive schema definitions that only allow primitive types without nested objects or arrays.
 

@@ -8,7 +8,6 @@
 
 {- |
 Module:      MCP.StdioIntegration
-Copyright:   (c) DPella AB 2025
 License:     MPL-2.0
 Maintainer:  <matti@dpella.io>, <lobo@dpella.io>
 
@@ -28,10 +27,7 @@ import Data.Map qualified as Map
 import Data.Text (Text)
 import MCP.Protocol
 import MCP.TestServer (
-    availablePrompts,
     availableResourceTemplates,
-    availableResources,
-    availableTools,
     completionValues,
     csvTestData,
     initializeTestState,
@@ -194,9 +190,8 @@ toolSpec = describe "Tools" $ do
             initializeServer h_read h_write
             sendMsg h_write (toJSON $ createListToolsRequest 2)
             (_, ListToolsResult{tools = ts}) <- recvTypedResponse h_read
-            length ts `shouldBe` length availableTools
             let tool_names = fmap (\Tool{name = n} -> n) ts
-            mapM_ (\Tool{name = n} -> n `shouldSatisfy` (`elem` tool_names)) availableTools
+            tool_names `shouldMatchList` ["addition-tool", "constant-msg-tool"]
 
     it "calls the addition tool" $ do
         withStdioServer $ \(h_read, h_write) -> do
@@ -230,9 +225,8 @@ resourceSpec = describe "Resources" $ do
             initializeServer h_read h_write
             sendMsg h_write (toJSON $ createListResourcesRequest 2)
             (_, ListResourcesResult{resources = rs}) <- recvTypedResponse h_read
-            length rs `shouldBe` length availableResources
             let resource_uris = fmap (\Resource{uri = u} -> u) rs
-            mapM_ (\Resource{uri = u} -> u `shouldSatisfy` (`elem` resource_uris)) availableResources
+            resource_uris `shouldMatchList` ["resource://example/document", "resource://example/data", "resource://example/image"]
 
     it "reads a text resource" $ do
         withStdioServer $ \(h_read, h_write) -> do
@@ -266,9 +260,8 @@ promptSpec = describe "Prompts" $ do
             initializeServer h_read h_write
             sendMsg h_write (toJSON $ createPromptListRequest 2)
             (_, ListPromptsResult{prompts = ps}) <- recvTypedResponse h_read
-            length ps `shouldBe` length availablePrompts
             let prompt_names = fmap (\Prompt{name = n} -> n) ps
-            mapM_ (\Prompt{name = n} -> n `shouldSatisfy` (`elem` prompt_names)) availablePrompts
+            prompt_names `shouldMatchList` ["code-review"]
 
     it "gets a prompt with arguments" $ do
         withStdioServer $ \(h_read, h_write) -> do
@@ -326,7 +319,7 @@ errorSpec = describe "Error Handling" $ do
         withStdioServer $ \(h_read, h_write) -> do
             sendMsg h_write (toJSON $ createListToolsRequest 1)
             JSONRPCError _ _ err_info <- recvError h_read
-            code err_info `shouldBe` (-32002)
+            code err_info `shouldBe` sERVER_NOT_INITIALIZED
 
     it "returns method_not_found for unknown methods" $ do
         withStdioServer $ \(h_read, h_write) -> do

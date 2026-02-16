@@ -1,4 +1,4 @@
-# DPella MCP — Model Context Protocol for Haskell
+# MCP — Model Context Protocol for Haskell
 
 [![mcp on Hackage](https://img.shields.io/hackage/v/mcp.svg)](https://hackage.haskell.org/package/mcp)
 [![mcp-types on Hackage](https://img.shields.io/hackage/v/mcp-types.svg)](https://hackage.haskell.org/package/mcp-types)
@@ -39,6 +39,8 @@ Core protocol types with minimal dependencies — suitable for building clients 
 Servant-based server implementation. Re-exports `MCP.Protocol` and `MCP.Types` for convenience.
 
 - **`MCP.Server`**: Core server infrastructure with `MCPServerT` monad transformer, `ProcessHandlers` record, `ToolHandler` framework, JWT-authenticated Servant API, server state management and request routing
+
+For OAuth 2.0 authorization in MCP clients, see [`oauth2-server`](https://hackage.haskell.org/package/oauth2-server).
 
 ## MCP Protocol Support
 
@@ -178,13 +180,18 @@ mcp-types/               # Core protocol types package
 
 mcp-server/               # Server implementation package
 ├── src/MCP/
-│   └── Server.hs            # Server infrastructure and Servant API
+│   ├── Server.hs            # Re-exports Common, HTTP, and Stdio
+│   └── Server/
+│       ├── Common.hs        # Types, state, request routing, tool helpers
+│       ├── HTTP.hs          # Servant-based HTTP transport with JWT auth
+│       └── Stdio.hs         # Stdio transport
 ├── test/
 │   ├── Main.hs              # Test entry point
 │   └── MCP/
-│       ├── Integration.hs   # Integration tests (hspec-wai)
-│       ├── TestServer.hs    # Test server configuration
-│       └── TestUtils.hs     # Test utilities and request builders
+│       ├── Integration.hs       # HTTP integration tests (hspec-wai)
+│       ├── StdioIntegration.hs  # Stdio integration tests
+│       ├── TestServer.hs        # Test server configuration
+│       └── TestUtils.hs         # Test utilities and request builders
 ├── example/
 │   ├── Main.hs              # Example server (tools, resources, prompts, etc.)
 │   ├── mcp-example.cabal    # Standalone cabal project

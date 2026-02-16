@@ -4,9 +4,12 @@
 
 ### Added
 - Protocol types extracted into `mcp-types`; server remains as `mcp`.
-- `MCP.Server`: Servant-based MCP server with JWT authentication, request routing, and handler framework.
+- `MCP.Server.Common`: transport-agnostic types, state, request routing, and tool helpers.
+- `MCP.Server.HTTP`: Servant-based HTTP transport with JWT authentication and SSE responses.
+- `MCP.Server.Stdio`: stdio transport reading/writing JSON-RPC messages line-by-line.
+- `MCP.Server`: re-exports all three submodules for backwards compatibility.
 - Re-exports `MCP.Protocol` and `MCP.Types` from `mcp-types` for convenience.
-- Integration test suite covering server lifecycle, authentication, protocol flows, endpoints, and error handling.
+- Integration test suite covering both HTTP and stdio transports.
 
 ### Migration
 - Change `import MCP` to `import MCP.Server`.

@@ -3,7 +3,6 @@
 
 {- |
 Module:      Main
-Copyright:   (c) DPella AB 2025
 License:     MPL-2.0
 Maintainer:  <matti@dpella.io>, <lobo@dpella.io>
 

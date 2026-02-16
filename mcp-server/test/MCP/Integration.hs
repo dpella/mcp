@@ -8,7 +8,6 @@
 
 {- |
 Module:      MCP.Integration
-Copyright:   (c) DPella AB 2025
 License:     MPL-2.0
 Maintainer:  <matti@dpella.io>, <lobo@dpella.io>
 
@@ -152,7 +151,7 @@ endpointsSpec = describe "Endpoint Health Check" $ do
     it "handles list/tools request successfully" $ do
         withInitializedServer $ \headers -> do
             let req_id = 2
-            let expected_tools = fmap (\Tool{name = t_name} -> t_name) availableTools
+            let expected_tools = ["addition-tool", "constant-msg-tool"]
             let list_tool_req = toJSON $ createListToolsRequest req_id
             -- the client sends the list tools request
             resp_list_tool <- mcpPostRequest headers list_tool_req
@@ -183,7 +182,7 @@ endpointsSpec = describe "Endpoint Health Check" $ do
     it "handles prompt/list requests successfully" $ do
         withInitializedServer $ \headers -> do
             let req_id = 5
-            let expected_prompts = fmap (\Prompt{name = p_name} -> p_name) availablePrompts
+            let expected_prompts = ["code-review"]
             let list_prompt_req = toJSON $ createPromptListRequest req_id
             -- the client sends the list prompts request
             resp_list_prompt <- mcpPostRequest headers list_prompt_req
@@ -210,7 +209,8 @@ endpointsSpec = describe "Endpoint Health Check" $ do
             resp_list_resources <- mcpPostRequest headers list_resources_req
             -- verify response's id and listed resources
             withValidJSONRPCResponse resp_list_resources req_id $
-                validateListResourcesResponse (fmap (\Resource{uri = r_uri} -> r_uri) availableResources)
+                validateListResourcesResponse
+                    ["resource://example/document", "resource://example/data", "resource://example/image"]
 
     it "handles read/resource requests successfully" $ do
         withInitializedServer $ \headers -> do
@@ -262,42 +262,42 @@ preInitializationSpec = describe "Pre-Initialization Enforcement" $ do
             let req = toJSON $ createListToolsRequest 1
             resp <- mcpPostRequest headers req
             withValidJSONRPCErrorResponse resp 1 $ \err_info ->
-                code err_info `shouldBe` (-32002)
+                code err_info `shouldBe` sERVER_NOT_INITIALIZED
 
     it "rejects tools/call before initialization" $
         withAuthenticatedRequest $ \headers -> do
             let req = toJSON $ createCallToolRequest 1 "addition-tool" [("arg1", toJSON (1 :: Int)), ("arg2", toJSON (2 :: Int))]
             resp <- mcpPostRequest headers req
             withValidJSONRPCErrorResponse resp 1 $ \err_info ->
-                code err_info `shouldBe` (-32002)
+                code err_info `shouldBe` sERVER_NOT_INITIALIZED
 
     it "rejects resources/list before initialization" $
         withAuthenticatedRequest $ \headers -> do
             let req = toJSON $ createListResourcesRequest 1
             resp <- mcpPostRequest headers req
             withValidJSONRPCErrorResponse resp 1 $ \err_info ->
-                code err_info `shouldBe` (-32002)
+                code err_info `shouldBe` sERVER_NOT_INITIALIZED
 
     it "rejects prompts/list before initialization" $
         withAuthenticatedRequest $ \headers -> do
             let req = toJSON $ createPromptListRequest 1
             resp <- mcpPostRequest headers req
             withValidJSONRPCErrorResponse resp 1 $ \err_info ->
-                code err_info `shouldBe` (-32002)
+                code err_info `shouldBe` sERVER_NOT_INITIALIZED
 
     it "rejects resources/templates/list before initialization" $
         withAuthenticatedRequest $ \headers -> do
             let req = toJSON $ createListResourceTemplatesRequest 1
             resp <- mcpPostRequest headers req
             withValidJSONRPCErrorResponse resp 1 $ \err_info ->
-                code err_info `shouldBe` (-32002)
+                code err_info `shouldBe` sERVER_NOT_INITIALIZED
 
     it "rejects completion/complete before initialization" $
         withAuthenticatedRequest $ \headers -> do
             let req = toJSON $ createCompleteRequest 1 "code-review" "code" ""
             resp <- mcpPostRequest headers req
             withValidJSONRPCErrorResponse resp 1 $ \err_info ->
-                code err_info `shouldBe` (-32002)
+                code err_info `shouldBe` sERVER_NOT_INITIALIZED
 
     it "allows ping before initialization" $
         withAuthenticatedRequest $ \headers -> do
@@ -401,9 +401,8 @@ resourceTemplateSpec = describe "Resource Templates" $ do
             let req = toJSON $ createListResourceTemplatesRequest 2
             resp <- mcpPostRequest headers req
             withValidJSONRPCResponse resp 2 $ \(ListResourceTemplatesResult{resourceTemplates = templates}) -> do
-                length templates `shouldBe` length availableResourceTemplates
                 let template_names = fmap (\ResourceTemplate{name = n} -> n) templates
-                mapM_ (\ResourceTemplate{name = n} -> n `shouldSatisfy` (`elem` template_names)) availableResourceTemplates
+                template_names `shouldMatchList` ["user-profile", "log-file"]
 
     it "handles resources/templates/list with null params" $
         withInitializedServer $ \headers -> do
@@ -538,9 +537,7 @@ validateToolsListResponse :: [Text] -> ListToolsResult -> Expectation
 validateToolsListResponse expected_tools = \case
     (ListToolsResult{tools = ls_tools}) -> do
         let tools_names = fmap (\(Tool{name = t_name}) -> t_name) ls_tools
-        -- Ensure all expected tools are present
-        length ls_tools `shouldBe` length expected_tools
-        mapM_ (`shouldSatisfy` (`elem` tools_names)) expected_tools
+        tools_names `shouldMatchList` expected_tools
 
 -- | Validates that the tool call response contains the expected result
 validateToolCallResponse :: Aeson.Value -> CallToolResult -> Expectation
@@ -556,9 +553,7 @@ validatePromptListResponse :: [Text] -> ListPromptsResult -> Expectation
 validatePromptListResponse expected_prompts = \case
     (ListPromptsResult{prompts = ls_prompts}) -> do
         let prompt_names = fmap (\(Prompt{name = p_name}) -> p_name) ls_prompts
-        -- Ensure all expected prompts are present
-        length ls_prompts `shouldBe` length expected_prompts
-        mapM_ (`shouldSatisfy` (`elem` expected_prompts)) prompt_names
+        prompt_names `shouldMatchList` expected_prompts
 
 {- | Validates that the get prompt response contains the expected description
 and messages with correct roles
@@ -576,9 +571,7 @@ validateListResourcesResponse :: [Text] -> ListResourcesResult -> Expectation
 validateListResourcesResponse expected_resources = \case
     (ListResourcesResult{resources = ls_resources}) -> do
         let resource_uris = fmap (\(Resource{uri = r_uri}) -> r_uri) ls_resources
-        -- Add your validation logic here based on the expected structure of resources
-        length ls_resources `shouldBe` length expected_resources
-        mapM_ (`shouldSatisfy` (`elem` expected_resources)) resource_uris
+        resource_uris `shouldMatchList` expected_resources
 
 -- | Validates that reading a resource response is as expected
 validateReadResourceResponse :: Text -> Text -> ReadResourceResult -> Expectation

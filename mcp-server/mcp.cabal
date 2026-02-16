@@ -59,6 +59,9 @@ library
 
   exposed-modules:
     MCP.Server
+    MCP.Server.Common
+    MCP.Server.HTTP
+    MCP.Server.Stdio
 
   build-depends:
     aeson >=2.1 && <2.3,
