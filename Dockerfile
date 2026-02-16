@@ -38,6 +38,7 @@ RUN --mount=type=cache,id=apt-cache-mcp,target=/var/cache/apt \
       build-essential \
       libffi-dev \
       libgmp-dev \
+      zlib1g-dev \
       && \
     apt-get autoremove -y && \
     apt-get clean -y && \
