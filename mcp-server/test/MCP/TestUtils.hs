@@ -17,7 +17,7 @@ implementation.
 module MCP.TestUtils where
 
 import Crypto.JOSE.Error as Crypto
-import Data.Aeson (ToJSON, Value (..), encode, toJSON)
+import Data.Aeson (ToJSON, Value (..), encode, object, toJSON, (.=))
 import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as BSL
 import Data.Map qualified as Map
@@ -255,3 +255,31 @@ createGetPromptRequest req_id p_name args =
 createInitializedNotification :: MCP.InitializedNotification
 createInitializedNotification =
     MCP.InitializedNotification{params = Nothing}
+
+-- | Create a JSON-RPC logging/setLevel request
+createSetLevelRequest :: Int -> MCP.LoggingLevel -> MCP.SetLevelRequest
+createSetLevelRequest req_id lvl =
+    MCP.SetLevelRequest
+        { id = toRequestId req_id
+        , params = MCP.SetLevelParams lvl
+        }
+
+-- | Create a JSON-RPC request for a resource template list
+createListResourceTemplatesRequest :: Int -> Value
+createListResourceTemplatesRequest req_id =
+    toJSON $
+        createJSONRPCRequest Nothing req_id "resources/templates/list" (object [])
+
+-- | Create a JSON-RPC request for completion/complete
+createCompleteRequest :: Int -> Text -> Text -> Text -> Value
+createCompleteRequest req_id ref_type ref_name arg_name =
+    toJSON $
+        createJSONRPCRequest
+            Nothing
+            req_id
+            "completion/complete"
+            ( object
+                [ "ref" .= object ["type" .= ref_type, "name" .= ref_name]
+                , "argument" .= object ["name" .= arg_name, "value" .= ("" :: Text)]
+                ]
+            )

@@ -38,6 +38,7 @@ import MCP.TestServer (
  )
 import MCP.TestUtils
 import MCP.Types
+import Network.HTTP.Types qualified as HTTP
 import Network.Wai.Test (SResponse (..))
 import Servant
 import Servant.Auth.Server qualified as AuthServer
@@ -46,6 +47,7 @@ import Test.Hspec.Wai (
     WaiSession,
     get,
     post,
+    request,
     shouldRespondWith,
     withState,
  )
@@ -61,6 +63,13 @@ integrationSpec = describe "MCP Integration Tests" $ do
         protocolFlowSpec
         endpointsSpec
         errorHandlingSpec
+        preInitializationSpec
+        protocolMethodsSpec
+        toolErrorSpec
+        resourceErrorSpec
+        promptErrorSpec
+        unimplementedHandlerSpec
+        nullParamsSpec
 
 -- | Test server startup and basic HTTP behavior
 serverLifecycleSpec :: SpecWith (AuthServer.JWTSettings, Application)
@@ -241,6 +250,194 @@ errorHandlingSpec = describe "Error Handling" $ do
                         createJSONRPCRequest Nothing (1 :: Int) "ping" large_value
             mcpPostRequestOk headers large_json
 
+-- | Test that methods are rejected before initialization
+preInitializationSpec :: SpecWith (AuthServer.JWTSettings, Application)
+preInitializationSpec = describe "Pre-Initialization Enforcement" $ do
+    it "rejects tools/list before initialization" $
+        withAuthenticatedRequest $ \headers -> do
+            let req = toJSON $ createListToolsRequest 1
+            resp <- mcpPostRequest headers req
+            withValidJSONRPCErrorResponse resp 1 $ \err_info ->
+                code err_info `shouldBe` (-32002)
+
+    it "rejects tools/call before initialization" $
+        withAuthenticatedRequest $ \headers -> do
+            let req = toJSON $ createCallToolRequest 1 "addition-tool" [("arg1", toJSON (1 :: Int)), ("arg2", toJSON (2 :: Int))]
+            resp <- mcpPostRequest headers req
+            withValidJSONRPCErrorResponse resp 1 $ \err_info ->
+                code err_info `shouldBe` (-32002)
+
+    it "rejects resources/list before initialization" $
+        withAuthenticatedRequest $ \headers -> do
+            let req = toJSON $ createListResourcesRequest 1
+            resp <- mcpPostRequest headers req
+            withValidJSONRPCErrorResponse resp 1 $ \err_info ->
+                code err_info `shouldBe` (-32002)
+
+    it "rejects prompts/list before initialization" $
+        withAuthenticatedRequest $ \headers -> do
+            let req = toJSON $ createPromptListRequest 1
+            resp <- mcpPostRequest headers req
+            withValidJSONRPCErrorResponse resp 1 $ \err_info ->
+                code err_info `shouldBe` (-32002)
+
+    it "allows ping before initialization" $
+        withAuthenticatedRequest $ \headers -> do
+            let req = toJSON createPingRequest
+            mcpPostRequestOk headers req
+
+    it "allows initialize before initialization" $
+        withAuthenticatedRequest $ \headers -> do
+            let req = toJSON createInitializeRequest
+            resp <- mcpPostRequest headers req
+            withValidJSONRPCResponse resp 1 validateInitializationResponse
+
+-- | Test various protocol-level methods
+protocolMethodsSpec :: SpecWith (AuthServer.JWTSettings, Application)
+protocolMethodsSpec = describe "Protocol Methods" $ do
+    it "handles ping after initialization" $
+        withInitializedServer $ \headers -> do
+            let req = toJSON createPingRequest
+            mcpPostRequestOk headers req
+
+    it "handles logging/setLevel" $
+        withInitializedServer $ \headers -> do
+            let req = toJSON $ createSetLevelRequest 2 Debug
+            mcpPostRequestOk headers req
+
+    it "returns method_not_found for unknown methods" $
+        withInitializedServer $ \headers -> do
+            let req =
+                    toJSON $
+                        createJSONRPCRequest Nothing (2 :: Int) "unknown/method" (object [])
+            resp <- mcpPostRequest headers req
+            withValidJSONRPCErrorResponse resp 2 $ \err_info ->
+                code err_info `shouldBe` mETHOD_NOT_FOUND
+
+    it "handles GET /mcp with valid authentication" $
+        withAuthenticatedRequest $ \headers -> do
+            let get_headers = filter (\(h, _) -> h /= "Content-Type") headers
+            let auth_header = filter (\(h, _) -> h == "Authorization") get_headers
+            resp <- getWithHeaders "/mcp" auth_header
+            liftIO $ HTTP.statusCode (simpleStatus resp) `shouldBe` 200
+
+-- | Test tool call error scenarios
+toolErrorSpec :: SpecWith (AuthServer.JWTSettings, Application)
+toolErrorSpec = describe "Tool Call Errors" $ do
+    it "returns error for non-existent tool" $
+        withInitializedServer $ \headers -> do
+            let req = toJSON $ createCallToolRequest 2 "nonexistent-tool" []
+            resp <- mcpPostRequest headers req
+            withValidJSONRPCErrorResponse resp 2 $ \err_info ->
+                code err_info `shouldBe` 404
+
+    it "returns error for missing required arguments" $
+        withInitializedServer $ \headers -> do
+            -- addition-tool requires arg1 and arg2, call with no args
+            let req = toJSON $ createCallToolRequest 2 "addition-tool" []
+            resp <- mcpPostRequest headers req
+            withValidJSONRPCErrorResponse resp 2 $ \err_info ->
+                code err_info `shouldBe` 400
+
+    it "returns error for partially missing required arguments" $
+        withInitializedServer $ \headers -> do
+            -- addition-tool requires arg1 and arg2, call with only arg1
+            let req = toJSON $ createCallToolRequest 2 "addition-tool" [("arg1", toJSON (5 :: Int))]
+            resp <- mcpPostRequest headers req
+            withValidJSONRPCErrorResponse resp 2 $ \err_info ->
+                code err_info `shouldBe` 400
+
+    it "returns error for invalid argument types" $
+        withInitializedServer $ \headers -> do
+            -- addition-tool expects numbers, pass strings
+            let req = toJSON $ createCallToolRequest 2 "addition-tool" [("arg1", toJSON ("not-a-number" :: Text)), ("arg2", toJSON (5 :: Int))]
+            resp <- mcpPostRequest headers req
+            withValidJSONRPCErrorResponse resp 2 $ \err_info ->
+                code err_info `shouldBe` 400
+
+-- | Test resource error scenarios
+resourceErrorSpec :: SpecWith (AuthServer.JWTSettings, Application)
+resourceErrorSpec = describe "Resource Errors" $ do
+    it "returns error for non-existent resource" $
+        withInitializedServer $ \headers -> do
+            let req = toJSON $ createReadResourceRequest 2 "resource://nonexistent/thing"
+            resp <- mcpPostRequest headers req
+            withValidJSONRPCErrorResponse resp 2 $ \err_info ->
+                code err_info `shouldBe` 404
+
+-- | Test prompt error scenarios
+promptErrorSpec :: SpecWith (AuthServer.JWTSettings, Application)
+promptErrorSpec = describe "Prompt Errors" $ do
+    it "returns error for non-existent prompt" $
+        withInitializedServer $ \headers -> do
+            let req = toJSON $ createGetPromptRequest 2 "nonexistent-prompt" Nothing
+            resp <- mcpPostRequest headers req
+            withValidJSONRPCErrorResponse resp 2 $ \err_info ->
+                code err_info `shouldBe` 404
+
+-- | Test methods whose handlers are not configured
+unimplementedHandlerSpec :: SpecWith (AuthServer.JWTSettings, Application)
+unimplementedHandlerSpec = describe "Unimplemented Handler Methods" $ do
+    it "returns method_not_found for resources/subscribe" $
+        withInitializedServer $ \headers -> do
+            let req = toJSON $ createSubscribeRequest 2 "resource://example/document"
+            resp <- mcpPostRequest headers req
+            withValidJSONRPCErrorResponse resp 2 $ \err_info ->
+                code err_info `shouldBe` mETHOD_NOT_FOUND
+
+    it "returns method_not_found for resources/templates/list" $
+        withInitializedServer $ \headers -> do
+            let req = createListResourceTemplatesRequest 2
+            resp <- mcpPostRequest headers req
+            withValidJSONRPCErrorResponse resp 2 $ \err_info ->
+                code err_info `shouldBe` mETHOD_NOT_FOUND
+
+    it "returns method_not_found for completion/complete" $
+        withInitializedServer $ \headers -> do
+            let req = createCompleteRequest 2 "ref/prompt" "code-review" "code"
+            resp <- mcpPostRequest headers req
+            withValidJSONRPCErrorResponse resp 2 $ \err_info ->
+                code err_info `shouldBe` mETHOD_NOT_FOUND
+
+-- | Test that null params work for list methods
+nullParamsSpec :: SpecWith (AuthServer.JWTSettings, Application)
+nullParamsSpec = describe "Null Params Handling" $ do
+    it "handles tools/list with null params" $
+        withInitializedServer $ \headers -> do
+            let req =
+                    toJSON $
+                        createJSONRPCRequest Nothing (2 :: Int) "tools/list" Aeson.Null
+            resp <- mcpPostRequest headers req
+            withValidJSONRPCResponse resp 2 $ \(ListToolsResult{tools = ls_tools}) ->
+                length ls_tools `shouldBe` length availableTools
+
+    it "handles resources/list with null params" $
+        withInitializedServer $ \headers -> do
+            let req =
+                    toJSON $
+                        createJSONRPCRequest Nothing (2 :: Int) "resources/list" Aeson.Null
+            resp <- mcpPostRequest headers req
+            withValidJSONRPCResponse resp 2 $ \(ListResourcesResult{resources = ls_resources}) ->
+                length ls_resources `shouldBe` length availableResources
+
+    it "handles prompts/list with null params" $
+        withInitializedServer $ \headers -> do
+            let req =
+                    toJSON $
+                        createJSONRPCRequest Nothing (2 :: Int) "prompts/list" Aeson.Null
+            resp <- mcpPostRequest headers req
+            withValidJSONRPCResponse resp 2 $ \(ListPromptsResult{prompts = ls_prompts}) ->
+                length ls_prompts `shouldBe` length availablePrompts
+
+    it "rejects resources/read with null params" $
+        withInitializedServer $ \headers -> do
+            let req =
+                    toJSON $
+                        createJSONRPCRequest Nothing (2 :: Int) "resources/read" Aeson.Null
+            resp <- mcpPostRequest headers req
+            withValidJSONRPCErrorResponse resp 2 $ \err_info ->
+                code err_info `shouldBe` iNVALID_PARAMS
+
 -- * Helper Functions
 
 -- ** Validation
@@ -335,6 +532,31 @@ validateReadResourceResponse expected_uri expected_content = \case
                 res_content `shouldBe` expected_content
             _ -> expectationFailure $ "Expected exactly 1 resource, got " <> show (length uris_contents)
 
+{- | Validates that the JSON-RPC error response can be parsed and applies
+the given properties to the parsed error info
+-}
+withValidJSONRPCErrorResponse ::
+    SResponse ->
+    Int ->
+    (JSONRPCErrorInfo -> Expectation) ->
+    WaiSession AuthServer.JWTSettings ()
+withValidJSONRPCErrorResponse resp expected_id props = do
+    liftIO $
+        case parseJSONRPCErrorResponse resp of
+            Right (JSONRPCError rpc_vrs req_id err_info) -> do
+                rpc_vrs `shouldBe` rPC_VERSION
+                req_id `shouldBe` toRequestId expected_id
+                props err_info
+            Left err_msg -> expectationFailure err_msg
+
+-- | Helper for making GET requests with specific headers
+getWithHeaders ::
+    BS.ByteString ->
+    [(HTTP.HeaderName, BS.ByteString)] ->
+    WaiSession st SResponse
+getWithHeaders path headers =
+    Test.Hspec.Wai.request HTTP.methodGet path headers ""
+
 -- ** Parsing
 
 -- | Parse JSON-RPC response from SSE response body
@@ -345,6 +567,16 @@ parseJSONRPCResponse resp =
             case Aeson.decodeStrict bs_response of
                 Just json_resp -> Right json_resp
                 Nothing -> Left $ "Failed to decode JSON-RPC response from: " <> show bs_response
+        Nothing -> Left $ "Failed to extract JSON data from SSE response: " <> show (simpleBody resp)
+
+-- | Parse JSON-RPC error response from SSE response body
+parseJSONRPCErrorResponse :: SResponse -> Either String JSONRPCError
+parseJSONRPCErrorResponse resp =
+    case extractSSEData (simpleBody resp) of
+        Just bs_response ->
+            case Aeson.decodeStrict bs_response of
+                Just json_err -> Right json_err
+                Nothing -> Left $ "Failed to decode JSON-RPC error from: " <> show bs_response
         Nothing -> Left $ "Failed to extract JSON data from SSE response: " <> show (simpleBody resp)
 
 {- | Extract JSON data from Server-Sent Events (SSE) format

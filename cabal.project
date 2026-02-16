@@ -1,6 +1,7 @@
 packages:
   mcp-types/mcp-types.cabal
   mcp-server/mcp.cabal
+  mcp-server/example/mcp-example.cabal
 
 -- GHC version
 with-compiler: ghc-9.12.2

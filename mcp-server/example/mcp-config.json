@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "mcp-example": {
+      "url": "http://localhost:8080/mcp",
+      "headers": {
+        "Authorization": "Bearer <PASTE_TOKEN_FROM_SERVER_OUTPUT>"
+      },
+      "description": "Example MCP server demonstrating tools, resources, prompts, and completions. Start the server first with: cabal run mcp-example"
+    }
+  }
+}

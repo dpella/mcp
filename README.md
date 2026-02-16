@@ -120,6 +120,49 @@ myTools =
   ]
 ```
 
+## Example Server
+
+A fully documented example server lives in `mcp-server/example/`. It demonstrates
+every major feature: tools, resources, resource templates, prompts, completions,
+logging, lifecycle hooks, and JWT authentication.
+
+### Run the example
+
+```bash
+cabal run mcp-example
+```
+
+The server starts on `http://localhost:8080/mcp` and prints a JWT bearer token to
+stdout. Use it in the `Authorization` header for all requests:
+
+```bash
+# Initialize the session (replace $TOKEN with the printed token)
+curl -s -X POST http://localhost:8080/mcp \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"1.0"}}}'
+
+# Send initialized notification
+curl -s -X POST http://localhost:8080/mcp \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"jsonrpc":"2.0","method":"notifications/initialized","params":null}'
+
+# List available tools
+curl -s -X POST http://localhost:8080/mcp \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+
+# Call the add tool
+curl -s -X POST http://localhost:8080/mcp \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"add","arguments":{"a":17,"b":25}}}'
+```
+
+See `mcp-server/example/SKILL.md` for curl examples covering all 15 endpoints.
+
 ## Project Structure
 
 ```
@@ -139,6 +182,11 @@ mcp-server/               # Server implementation package
 │       ├── Integration.hs   # Integration tests (hspec-wai)
 │       ├── TestServer.hs    # Test server configuration
 │       └── TestUtils.hs     # Test utilities and request builders
+├── example/
+│   ├── Main.hs              # Example server (tools, resources, prompts, etc.)
+│   ├── mcp-example.cabal    # Standalone cabal project
+│   ├── mcp-config.json      # Claude Desktop MCP configuration template
+│   └── SKILL.md             # Build, run, and test instructions
 └── mcp.cabal
 ```
 
