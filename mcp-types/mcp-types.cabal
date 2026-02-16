@@ -8,6 +8,7 @@ author: DPella AB
 tested-with: ghc ==9.12.2
 extra-doc-files:
   CHANGELOG.md
+  README.md
 
 maintainer:
   matti@dpella.io,
