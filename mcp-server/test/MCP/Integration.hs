@@ -29,8 +29,10 @@ import Data.Text (Text)
 import MCP.Protocol
 import MCP.TestServer (
     availablePrompts,
+    availableResourceTemplates,
     availableResources,
     availableTools,
+    completionValues,
     createTestAppWithJWT,
     csvTestData,
     imageTestData,
@@ -68,6 +70,8 @@ integrationSpec = describe "MCP Integration Tests" $ do
         toolErrorSpec
         resourceErrorSpec
         promptErrorSpec
+        resourceTemplateSpec
+        completionSpec
         unimplementedHandlerSpec
         nullParamsSpec
 
@@ -281,6 +285,20 @@ preInitializationSpec = describe "Pre-Initialization Enforcement" $ do
             withValidJSONRPCErrorResponse resp 1 $ \err_info ->
                 code err_info `shouldBe` (-32002)
 
+    it "rejects resources/templates/list before initialization" $
+        withAuthenticatedRequest $ \headers -> do
+            let req = toJSON $ createListResourceTemplatesRequest 1
+            resp <- mcpPostRequest headers req
+            withValidJSONRPCErrorResponse resp 1 $ \err_info ->
+                code err_info `shouldBe` (-32002)
+
+    it "rejects completion/complete before initialization" $
+        withAuthenticatedRequest $ \headers -> do
+            let req = toJSON $ createCompleteRequest 1 "code-review" "code" ""
+            resp <- mcpPostRequest headers req
+            withValidJSONRPCErrorResponse resp 1 $ \err_info ->
+                code err_info `shouldBe` (-32002)
+
     it "allows ping before initialization" $
         withAuthenticatedRequest $ \headers -> do
             let req = toJSON createPingRequest
@@ -375,26 +393,64 @@ promptErrorSpec = describe "Prompt Errors" $ do
             withValidJSONRPCErrorResponse resp 2 $ \err_info ->
                 code err_info `shouldBe` 404
 
+-- | Test resource template operations
+resourceTemplateSpec :: SpecWith (AuthServer.JWTSettings, Application)
+resourceTemplateSpec = describe "Resource Templates" $ do
+    it "handles resources/templates/list successfully" $
+        withInitializedServer $ \headers -> do
+            let req = toJSON $ createListResourceTemplatesRequest 2
+            resp <- mcpPostRequest headers req
+            withValidJSONRPCResponse resp 2 $ \(ListResourceTemplatesResult{resourceTemplates = templates}) -> do
+                length templates `shouldBe` length availableResourceTemplates
+                let template_names = fmap (\ResourceTemplate{name = n} -> n) templates
+                mapM_ (\ResourceTemplate{name = n} -> n `shouldSatisfy` (`elem` template_names)) availableResourceTemplates
+
+    it "handles resources/templates/list with null params" $
+        withInitializedServer $ \headers -> do
+            let req =
+                    toJSON $
+                        createJSONRPCRequest Nothing (2 :: Int) "resources/templates/list" Aeson.Null
+            resp <- mcpPostRequest headers req
+            withValidJSONRPCResponse resp 2 $ \(ListResourceTemplatesResult{resourceTemplates = templates}) ->
+                length templates `shouldBe` length availableResourceTemplates
+
+-- | Test completion operations
+completionSpec :: SpecWith (AuthServer.JWTSettings, Application)
+completionSpec = describe "Completions" $ do
+    it "handles completion/complete for known prompt argument" $
+        withInitializedServer $ \headers -> do
+            let req = toJSON $ createCompleteRequest 2 "code-review" "code" ""
+            resp <- mcpPostRequest headers req
+            withValidJSONRPCResponse resp 2 $ \(CompleteResult{completion = CompletionResult{values = vals}}) ->
+                vals `shouldBe` completionValues
+
+    it "handles completion/complete with prefix filter" $
+        withInitializedServer $ \headers -> do
+            let req = toJSON $ createCompleteRequest 2 "code-review" "code" "def"
+            resp <- mcpPostRequest headers req
+            withValidJSONRPCResponse resp 2 $ \(CompleteResult{completion = CompletionResult{values = vals}}) ->
+                vals `shouldBe` ["def foo():"]
+
+    it "returns empty completions for unknown prompt" $
+        withInitializedServer $ \headers -> do
+            let req = toJSON $ createCompleteRequest 2 "nonexistent" "arg" ""
+            resp <- mcpPostRequest headers req
+            withValidJSONRPCResponse resp 2 $ \(CompleteResult{completion = CompletionResult{values = vals}}) ->
+                vals `shouldBe` []
+
+    it "returns empty completions for unknown argument" $
+        withInitializedServer $ \headers -> do
+            let req = toJSON $ createCompleteRequest 2 "code-review" "nonexistent-arg" ""
+            resp <- mcpPostRequest headers req
+            withValidJSONRPCResponse resp 2 $ \(CompleteResult{completion = CompletionResult{values = vals}}) ->
+                vals `shouldBe` []
+
 -- | Test methods whose handlers are not configured
 unimplementedHandlerSpec :: SpecWith (AuthServer.JWTSettings, Application)
 unimplementedHandlerSpec = describe "Unimplemented Handler Methods" $ do
     it "returns method_not_found for resources/subscribe" $
         withInitializedServer $ \headers -> do
             let req = toJSON $ createSubscribeRequest 2 "resource://example/document"
-            resp <- mcpPostRequest headers req
-            withValidJSONRPCErrorResponse resp 2 $ \err_info ->
-                code err_info `shouldBe` mETHOD_NOT_FOUND
-
-    it "returns method_not_found for resources/templates/list" $
-        withInitializedServer $ \headers -> do
-            let req = createListResourceTemplatesRequest 2
-            resp <- mcpPostRequest headers req
-            withValidJSONRPCErrorResponse resp 2 $ \err_info ->
-                code err_info `shouldBe` mETHOD_NOT_FOUND
-
-    it "returns method_not_found for completion/complete" $
-        withInitializedServer $ \headers -> do
-            let req = createCompleteRequest 2 "ref/prompt" "code-review" "code"
             resp <- mcpPostRequest headers req
             withValidJSONRPCErrorResponse resp 2 $ \err_info ->
                 code err_info `shouldBe` mETHOD_NOT_FOUND
@@ -428,6 +484,15 @@ nullParamsSpec = describe "Null Params Handling" $ do
             resp <- mcpPostRequest headers req
             withValidJSONRPCResponse resp 2 $ \(ListPromptsResult{prompts = ls_prompts}) ->
                 length ls_prompts `shouldBe` length availablePrompts
+
+    it "handles resources/templates/list with null params" $
+        withInitializedServer $ \headers -> do
+            let req =
+                    toJSON $
+                        createJSONRPCRequest Nothing (2 :: Int) "resources/templates/list" Aeson.Null
+            resp <- mcpPostRequest headers req
+            withValidJSONRPCResponse resp 2 $ \(ListResourceTemplatesResult{resourceTemplates = templates}) ->
+                length templates `shouldBe` length availableResourceTemplates
 
     it "rejects resources/read with null params" $
         withInitializedServer $ \headers -> do

@@ -71,6 +71,8 @@ import MCP.Server
 import Network.Wai.Handler.Warp qualified as Warp
 import Servant (Context (..), Proxy (..), serveWithContext)
 import Servant.Auth.Server qualified as AuthServer
+import System.Environment (getArgs, lookupEnv)
+import System.IO (hSetBuffering, stderr, stdin, stdout, BufferMode (..))
 
 -- ---------------------------------------------------------------------------
 -- User and state types
@@ -450,12 +452,56 @@ handleFinalize st = return st{currentUser = Nothing}
 
 -- | Entry point.
 --
--- 1. Build the initial 'MCPServerState' via 'initMCPServerState'.
--- 2. Generate a JWK key and mint a bearer token for manual testing.
--- 3. Construct the Servant context (@CookieSettings :. JWTSettings :. EmptyContext@).
--- 4. Serve on port 8080.
+-- Supports two modes:
+--
+-- * __HTTP mode__ (default): starts a Warp server with JWT authentication.
+-- * __Stdio mode__ (@--stdio@): reads JSON-RPC from stdin, writes to stdout.
+--   No authentication is needed.  Debug output goes to stderr.
+--
+-- @
+-- cabal run mcp-example            # HTTP on port 8080
+-- cabal run mcp-example -- --stdio # stdio transport
+-- @
 main :: IO ()
 main = do
+    args <- getArgs
+    if "--stdio" `elem` args
+        then mainStdio
+        else mainHTTP
+
+-- | Run in stdio transport mode.
+--
+-- Reads JSON-RPC messages from stdin and writes responses to stdout.
+-- There is no JWT authentication — the caller is trusted.
+-- Debug/log output goes to stderr so it doesn't interfere with the protocol.
+mainStdio :: IO ()
+mainStdio = do
+    hSetBuffering stderr LineBuffering
+
+    let impl = Implementation "mcp-example" "0.1.0" (Just "Example MCP Server")
+    let server_instructions = Just "This is an example MCP server. It provides echo, add, and current-time tools, sample resources, a summarize prompt, and completions."
+    let initial_state =
+            (initMCPServerState
+                (ExampleState Nothing) -- initial handler state
+                Nothing -- no handler init in stdio mode (no JWT user)
+                (Just handleFinalize) -- lifecycle: after each request
+                exampleCapabilities -- what we support
+                impl -- server name + version
+                server_instructions -- instructions for clients
+                exampleHandlers -- all our handlers
+            ){mcp_log_level = Just Debug}
+
+    serveStdio stdin stdout initial_state
+
+-- | Run in HTTP mode with JWT authentication.
+mainHTTP :: IO ()
+mainHTTP = do
+    -- Use line buffering so output is visible immediately when piped.
+    hSetBuffering stdout LineBuffering
+
+    -- Read port from PORT env var, default to 8080.
+    port <- maybe 8080 read <$> lookupEnv "PORT"
+
     -- Server metadata shown to clients during initialization.
     let impl = Implementation "mcp-example" "0.1.0" (Just "Example MCP Server")
 
@@ -464,8 +510,9 @@ main = do
 
     -- Create the initial server state.  initMCPServerState sets sensible
     -- defaults: not yet initialized, log level Warning, empty pending responses.
+    -- We override the log level to Debug so all requests/responses are logged.
     let initial_state =
-            initMCPServerState
+            (initMCPServerState
                 (ExampleState Nothing) -- initial handler state
                 (Just handleInit) -- lifecycle: on initialize
                 (Just handleFinalize) -- lifecycle: after each request
@@ -473,6 +520,7 @@ main = do
                 impl -- server name + version
                 server_instructions -- instructions for clients
                 exampleHandlers -- all our handlers
+            ){mcp_log_level = Just Debug}
     state_var <- newMVar initial_state
 
     -- Generate a fresh JWK key for signing tokens.
@@ -490,20 +538,20 @@ main = do
         Right token -> do
             let token_str = TE.decodeUtf8 $ BSL.toStrict token
             putStrLn "=== Example MCP Server ==="
-            putStrLn "Listening on http://localhost:8080/mcp"
+            putStrLn $ "Listening on http://localhost:" <> show port <> "/mcp"
             putStrLn ""
             putStrLn "Bearer token for testing:"
             putStrLn $ T.unpack token_str
             putStrLn ""
             putStrLn "Example curl:"
-            putStrLn "  curl -X POST http://localhost:8080/mcp \\"
+            putStrLn $ "  curl -X POST http://localhost:" <> show port <> "/mcp \\"
             putStrLn "    -H 'Content-Type: application/json' \\"
             putStrLn $ "    -H 'Authorization: Bearer " <> T.unpack token_str <> "' \\"
             putStrLn "    -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"curl\",\"version\":\"1.0\"}}}'"
 
     -- Build the Servant application and start Warp.
     let app = serveWithContext (Proxy @MCPAPI) ctx (mcpAPI state_var)
-    Warp.run 8080 app
+    Warp.run port app
 
 -- ---------------------------------------------------------------------------
 -- JSON value helpers

@@ -1,0 +1,12 @@
+{
+  "name": "mcp-example-test",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node test_mcp_server.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.42"
+  }
+}

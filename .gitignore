@@ -12,3 +12,5 @@ tags
 cabal.project.local
 
 artifacts/
+.envrc
+venv/

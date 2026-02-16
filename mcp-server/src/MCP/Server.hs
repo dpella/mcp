@@ -53,6 +53,13 @@ module MCP.Server (
     MCPHandlerState,
     MCPHandlerUser,
 
+    -- * Stdio transport
+    serveStdio,
+
+    -- * Core processing (transport-agnostic)
+    processMethod,
+    recurReplaceMeta,
+
     -- * Servant API
     MCPAPI,
     mcpAPI,
@@ -68,9 +75,11 @@ import Control.Concurrent.MVar
 import Control.Monad (when)
 import Control.Monad.Except
 import Control.Monad.State.Lazy
+import Data.IORef
 import Data.Aeson (Value, encode, fromJSON, object, toJSON, (.=))
 import Data.Aeson qualified as Aeson
 import Data.Aeson.KeyMap qualified as KM
+import Data.ByteString.Char8 qualified as BS
 import Data.ByteString.Lazy.Char8 qualified as BSL
 import Data.IntMap (IntMap)
 import Data.IntMap qualified as IM
@@ -82,6 +91,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding (encodeUtf8)
 import Data.Tuple (swap)
+import System.IO (BufferMode (..), Handle, hFlush, hIsEOF, hSetBuffering)
 import MCP.Protocol
 import MCP.Types
 import Network.HTTP.Media ((//))
@@ -438,8 +448,8 @@ handleMCPRequest state_var auth_result request_value =
                     liftIO $ readMVar state_var
                 case log_level of
                     Nothing -> return ()
-                    Just level -> when (level >= Debug) $ do
-                        liftIO $ BSL.putStrLn $ encode request_value
+                    Just level -> when (level >= Debug) $
+                        liftIO $ BSL.putStrLn $ "[request] " <> encode request_value
 
                 case request_value of
                     NotificationMessage _ ->
@@ -487,7 +497,20 @@ handleMCPRequest state_var auth_result request_value =
                                                 return cur_st{mcp_handler_state = h_st'}
 
                         -- Process the request routing to the appropriate handler
-                        res <- liftIO $ modifyMVar state_var $ fmap swap <$> runStateT (process server_initialized method params)
+                        res <- liftIO $ modifyMVar state_var $ fmap swap <$> runStateT (processMethod server_initialized method params)
+
+                        -- Log the response if debug level
+                        cur_log_level <- liftIO $ mcp_log_level <$> readMVar state_var
+                        case cur_log_level of
+                            Just level | level >= Debug -> liftIO $ do
+                                let prefix = "[response] " <> BSL.fromStrict (encodeUtf8 method) <> " -> "
+                                let body = case res of
+                                        ProcessSuccess val -> encode val
+                                        ProcessRPCError code msg -> encode $ object ["error" .= msg, "code" .= code]
+                                        ProcessServerError err -> encode $ object ["serverError" .= err]
+                                        ProcessClientInput{} -> "client-input"
+                                BSL.putStrLn $ prefix <> body
+                            _ -> return ()
 
                         -- Get the final result to return
                         final_result <- liftIO $ handleProcessResult req_id res
@@ -559,18 +582,6 @@ handleMCPRequest state_var auth_result request_value =
                                 Right response ->
                                     handleProcessResult req_id response
             ProcessSuccess response -> do
-                -- Handle additional metadata
-                let replaceMeta (Aeson.Object obj)
-                        | Just (Aeson.Object meta) <- KM.lookup "_meta" obj =
-                            Aeson.Object $ KM.delete "_meta" obj `KM.union` meta
-                    replaceMeta v = v
-                    recurReplaceMeta (Aeson.Array arr) =
-                        Aeson.Array $ fmap recurReplaceMeta arr
-                    recurReplaceMeta o@(Aeson.Object _)
-                        | Aeson.Object obj' <- replaceMeta o =
-                            Aeson.Object $ fmap recurReplaceMeta obj'
-                    recurReplaceMeta v = v
-
                 return $
                     flip Yield Stop $
                         ResponseMessage $
@@ -580,88 +591,268 @@ handleMCPRequest state_var auth_result request_value =
     mcpAuthError :: Text -> Handler (StepT IO JSONRPCMessage)
     mcpAuthError err = throwError err401{errBody = encode $ object ["error" .= err]}
 
-    -- Standard JSON-RPC error responses
-    missing_params = return $ ProcessRPCError iNVALID_PARAMS "Missing params"
-    invalid_params = return . ProcessRPCError iNVALID_PARAMS . ("Invalid params: " <>) . T.pack
-    server_not_initialized = return $ ProcessRPCError (-32002) "Server not initialized"
-    method_not_found = return $ ProcessRPCError mETHOD_NOT_FOUND "Method not found"
+{- | Run the MCP server over stdio transport.
 
-    -- Methods that can be called without initialization
-    allowed_without_initialization :: Set Text
-    allowed_without_initialization = Set.fromList ["ping", "initialize"]
+Reads JSON-RPC messages line-by-line from the input handle,
+processes them through the standard MCP message handler, and writes
+JSON-RPC responses line-by-line to the output handle.
 
-    -- Methods that are allowed without parameters
-    allowed_without_params :: Text -> Bool
-    allowed_without_params = T.isSuffixOf "/list"
+Stdio transport does not use JWT authentication; it is assumed that
+the process boundary provides authentication.
 
-    -- Main processing function routing to handlers
-    process :: Bool -> Text -> Aeson.Value -> StateT MCPServerState IO (ProcessResult Aeson.Value)
-    process False mthd _ | not $ mthd `Set.member` allowed_without_initialization = server_not_initialized
-    process _ mthd Aeson.Null | allowed_without_params mthd = process True mthd (object [])
-    process _ "resources/list" mb_arg = runProcessHandler listResourcesHandler mb_arg
-    process _ "resources/read" mb_arg = runProcessHandler readResourceHandler mb_arg
-    process _ "resources/subscribe" mb_arg = runProcessHandler subscribeHandler mb_arg
-    process _ "resources/unsubscribe" mb_arg = runProcessHandler unsubscribeHandler mb_arg
-    process _ "tools/list" mb_arg = runProcessHandler listToolsHandler mb_arg
-    process _ "tools/call" mb_arg = runProcessHandler callToolHandler mb_arg
-    process _ "prompts/list" mb_arg = runProcessHandler listPromptsHandler mb_arg
-    process _ "prompts/get" mb_arg = runProcessHandler getPromptHandler mb_arg
-    process _ "resources/templates/list" mb_arg = runProcessHandler listResourceTemplatesHandler mb_arg
-    process _ "completion/complete" mb_arg = runProcessHandler completeHandler mb_arg
-    process _ "ping" _ = return $ ProcessSuccess (toJSON $ object [])
-    process _ "logging/setLevel" p
-        | Aeson.Error e <- fromJSON @SetLevelParams p = invalid_params e
-    process _ "logging/setLevel" p
-        | Aeson.Success (SetLevelParams{level = level}) <- fromJSON @SetLevelParams p = do
-            modify $ \s -> s{mcp_log_level = Just level}
-            return $ ProcessSuccess Aeson.Null
-    process _ "initialize" p
-        | Aeson.Error e <- fromJSON @InitializeParams p = invalid_params e
-    process _ "initialize" p
-        | Aeson.Success (InitializeParams{capabilities = capabilities}) <- fromJSON @InitializeParams p = do
-            MCPServerState{..} <- get
-            modify $ \s ->
-                s
-                    { mcp_server_initialized = True
-                    , mcp_client_capabilities = Just capabilities
+The server runs until EOF is reached on the input handle.
+-}
+serveStdio ::
+    -- | Input handle (typically stdin)
+    Handle ->
+    -- | Output handle (typically stdout)
+    Handle ->
+    -- | Initial server state
+    MCPServerState ->
+    IO ()
+serveStdio h_in h_out initial_state = do
+    hSetBuffering h_in LineBuffering
+    hSetBuffering h_out LineBuffering
+    state_ref <- newIORef initial_state
+    loop state_ref
+  where
+    loop :: IORef MCPServerState -> IO ()
+    loop state_ref = do
+        eof <- hIsEOF h_in
+        if eof
+            then return ()
+            else do
+                line <- BS.hGetLine h_in
+                case Aeson.eitherDecodeStrict' line of
+                    Left err -> do
+                        -- JSON parse error — write error response with null id
+                        writeMsg $
+                            ErrorMessage $
+                                JSONRPCError rPC_VERSION (RequestId Aeson.Null) $
+                                    JSONRPCErrorInfo pARSE_ERROR (T.pack err) Nothing
+                        loop state_ref
+                    Right msg -> do
+                        processStdioMessage state_ref msg
+                        loop state_ref
+
+    processStdioMessage :: IORef MCPServerState -> JSONRPCMessage -> IO ()
+    processStdioMessage state_ref = \case
+        NotificationMessage _ ->
+            -- Notifications don't produce a response
+            return ()
+        ErrorMessage _ ->
+            -- Client sent an error — nothing to respond to
+            return ()
+        ResponseMessage _ ->
+            -- Unexpected response from client outside of ProcessClientInput
+            return ()
+        RequestMessage (JSONRPCRequest jsonrpc req_id method params) -> do
+            -- Validate JSON-RPC version
+            if jsonrpc /= rPC_VERSION
+                then
+                    writeMsg $
+                        ErrorMessage $
+                            JSONRPCError rPC_VERSION req_id $
+                                JSONRPCErrorInfo iNVALID_REQUEST "Invalid jsonrpc version" Nothing
+                else do
+                    -- Validate request ID
+                    if not (isValidRequestId req_id)
+                        then
+                            writeMsg $
+                                ErrorMessage $
+                                    JSONRPCError rPC_VERSION req_id $
+                                        JSONRPCErrorInfo iNVALID_REQUEST "Invalid request ID" Nothing
+                        else do
+                            cur_st <- readIORef state_ref
+                            let initialized = mcp_server_initialized cur_st
+
+                            -- Process the request
+                            (res, new_st) <- runStateT (processMethod initialized method params) cur_st
+                            writeIORef state_ref new_st
+
+                            -- Handle ProcessClientInput by synchronous read/write
+                            final_res <- resolveClientInput state_ref res
+
+                            -- Convert result to response message
+                            case final_res of
+                                ProcessServerError err ->
+                                    writeMsg $
+                                        ErrorMessage $
+                                            JSONRPCError rPC_VERSION req_id $
+                                                JSONRPCErrorInfo iNTERNAL_ERROR err Nothing
+                                ProcessRPCError rpc_code rpc_msg ->
+                                    writeMsg $
+                                        ErrorMessage $
+                                            JSONRPCError rPC_VERSION req_id $
+                                                JSONRPCErrorInfo rpc_code rpc_msg Nothing
+                                ProcessSuccess response ->
+                                    writeMsg $
+                                        ResponseMessage $
+                                            JSONRPCResponse rPC_VERSION req_id (recurReplaceMeta response)
+                                ProcessClientInput{} ->
+                                    -- Should not happen after resolveClientInput
+                                    writeMsg $
+                                        ErrorMessage $
+                                            JSONRPCError rPC_VERSION req_id $
+                                                JSONRPCErrorInfo iNTERNAL_ERROR "Unresolved client input" Nothing
+
+                            -- Finalize handler state
+                            modifyIORef' state_ref $ \st ->
+                                case mcp_handler_finalize st of
+                                    Nothing -> st
+                                    Just _ -> st -- finalize needs IO, handle below
+                            st <- readIORef state_ref
+                            case mcp_handler_finalize st of
+                                Nothing -> return ()
+                                Just finalizer -> do
+                                    h_st' <- finalizer (mcp_handler_state st)
+                                    writeIORef state_ref st{mcp_handler_state = h_st'}
+
+    -- | Resolve ProcessClientInput by writing a request to the client and
+    -- reading the response synchronously from stdin.
+    resolveClientInput :: IORef MCPServerState -> ProcessResult Aeson.Value -> IO (ProcessResult Aeson.Value)
+    resolveClientInput state_ref = \case
+        ProcessClientInput ci_mthd ci_params ci_cont -> do
+            -- Assign a request ID
+            st <- readIORef state_ref
+            let r_id = mcp_pending_responses_next st
+            writeIORef state_ref st{mcp_pending_responses_next = r_id + 1}
+
+            -- Write the server-to-client request
+            writeMsg $
+                RequestMessage $
+                    JSONRPCRequest rPC_VERSION (RequestId $ Aeson.Number $ fromIntegral r_id) ci_mthd ci_params
+
+            -- Read the client's response synchronously
+            resp_line <- BS.hGetLine h_in
+            case Aeson.eitherDecodeStrict' @JSONRPCMessage resp_line of
+                Right (ResponseMessage (JSONRPCResponse _ _ result)) -> do
+                    -- Run the continuation with the client's response
+                    cur_st <- readIORef state_ref
+                    (cont_result, new_st) <- runStateT (runExceptT $ ci_cont result) cur_st
+                    writeIORef state_ref new_st
+                    case cont_result of
+                        Left err -> return $ ProcessServerError err
+                        Right next_res -> resolveClientInput state_ref next_res
+                Right (ErrorMessage (JSONRPCError _ _ (JSONRPCErrorInfo _ err_msg _))) ->
+                    return $ ProcessServerError err_msg
+                _ ->
+                    return $ ProcessServerError "Expected response to client input request"
+        other -> return other
+
+    writeMsg :: JSONRPCMessage -> IO ()
+    writeMsg msg = do
+        BSL.hPut h_out (encode msg)
+        BSL.hPut h_out "\n"
+        hFlush h_out
+
+-- | Normalize @_meta@ fields in JSON-RPC responses.
+-- Promotes the contents of @_meta@ objects up one level and removes the @_meta@ key.
+recurReplaceMeta :: Aeson.Value -> Aeson.Value
+recurReplaceMeta (Aeson.Array arr) =
+    Aeson.Array $ fmap recurReplaceMeta arr
+recurReplaceMeta o@(Aeson.Object _)
+    | Aeson.Object obj' <- replaceMeta o =
+        Aeson.Object $ fmap recurReplaceMeta obj'
+recurReplaceMeta v = v
+
+-- | Replace @_meta@ at the top level of an object
+replaceMeta :: Aeson.Value -> Aeson.Value
+replaceMeta (Aeson.Object obj)
+    | Just (Aeson.Object meta) <- KM.lookup "_meta" obj =
+        Aeson.Object $ KM.delete "_meta" obj `KM.union` meta
+replaceMeta v = v
+
+-- | Check if a RequestId is valid according to JSON-RPC 2.0 spec.
+isValidRequestId :: RequestId -> Bool
+isValidRequestId (RequestId v) =
+    case v of
+        Aeson.Number _ -> True
+        Aeson.String _ -> True
+        Aeson.Null -> True
+        _ -> False
+
+-- | Methods that can be called without initialization
+allowedWithoutInitialization :: Set Text
+allowedWithoutInitialization = Set.fromList ["ping", "initialize"]
+
+-- | Methods that are allowed without parameters (null params -> empty object)
+allowedWithoutParams :: Text -> Bool
+allowedWithoutParams = T.isSuffixOf "/list"
+
+-- | Main processing function routing JSON-RPC methods to handlers.
+-- This is the transport-agnostic core of the MCP server.
+processMethod :: Bool -> Text -> Aeson.Value -> StateT MCPServerState IO (ProcessResult Aeson.Value)
+processMethod False mthd _ | not $ mthd `Set.member` allowedWithoutInitialization = server_not_initialized
+processMethod _ mthd Aeson.Null | allowedWithoutParams mthd = processMethod True mthd (object [])
+processMethod _ "resources/list" mb_arg = runProcessHandler listResourcesHandler mb_arg
+processMethod _ "resources/read" mb_arg = runProcessHandler readResourceHandler mb_arg
+processMethod _ "resources/subscribe" mb_arg = runProcessHandler subscribeHandler mb_arg
+processMethod _ "resources/unsubscribe" mb_arg = runProcessHandler unsubscribeHandler mb_arg
+processMethod _ "tools/list" mb_arg = runProcessHandler listToolsHandler mb_arg
+processMethod _ "tools/call" mb_arg = runProcessHandler callToolHandler mb_arg
+processMethod _ "prompts/list" mb_arg = runProcessHandler listPromptsHandler mb_arg
+processMethod _ "prompts/get" mb_arg = runProcessHandler getPromptHandler mb_arg
+processMethod _ "resources/templates/list" mb_arg = runProcessHandler listResourceTemplatesHandler mb_arg
+processMethod _ "completion/complete" mb_arg = runProcessHandler completeHandler mb_arg
+processMethod _ "ping" _ = return $ ProcessSuccess (toJSON $ object [])
+processMethod _ "logging/setLevel" p
+    | Aeson.Error e <- fromJSON @SetLevelParams p = invalid_params e
+processMethod _ "logging/setLevel" p
+    | Aeson.Success (SetLevelParams{level = level}) <- fromJSON @SetLevelParams p = do
+        modify $ \s -> s{mcp_log_level = Just level}
+        return $ ProcessSuccess Aeson.Null
+processMethod _ "initialize" p
+    | Aeson.Error e <- fromJSON @InitializeParams p = invalid_params e
+processMethod _ "initialize" p
+    | Aeson.Success (InitializeParams{capabilities = capabilities}) <- fromJSON @InitializeParams p = do
+        MCPServerState{..} <- get
+        modify $ \s ->
+            s
+                { mcp_server_initialized = True
+                , mcp_client_capabilities = Just capabilities
+                }
+        let result =
+                InitializeResult
+                    { protocolVersion = pROTOCOL_VERSION
+                    , capabilities = mcp_server_capabilities
+                    , serverInfo = mcp_implementation
+                    , instructions = mcp_instructions
+                    , _meta = Nothing
                     }
-            let result =
-                    InitializeResult
-                        { protocolVersion = pROTOCOL_VERSION
-                        , capabilities = mcp_server_capabilities
-                        , serverInfo = mcp_implementation
-                        , instructions = mcp_instructions
-                        , _meta = Nothing
-                        }
-            return $ ProcessSuccess $ toJSON result
-    process _ _ _ = method_not_found
+        return $ ProcessSuccess $ toJSON result
+processMethod _ _ _ = method_not_found
 
-    -- Helper to run a process handler with argument parsing
-    runProcessHandler ::
-        forall a b.
-        (Aeson.FromJSON a, Aeson.ToJSON b) =>
-        (ProcessHandlers -> Maybe (a -> MCPServerT (ProcessResult b))) ->
-        Aeson.Value ->
-        StateT MCPServerState IO (ProcessResult Aeson.Value)
-    runProcessHandler _ Aeson.Null = missing_params
-    runProcessHandler handler arg_value =
-        case fromJSON @a arg_value of
-            Aeson.Error err -> invalid_params err
-            Aeson.Success arg -> do
-                handlerImpl <- gets (handler . mcp_process_handlers)
-                case handlerImpl of
-                    Just impl -> do
-                        impl_res <- runExceptT $ impl arg
-                        case impl_res of
-                            Left err -> return $ ProcessServerError err
-                            Right res -> return $ fmap toJSON res
-                    Nothing -> method_not_found
+-- | Standard JSON-RPC error responses
+missing_params :: StateT MCPServerState IO (ProcessResult Aeson.Value)
+missing_params = return $ ProcessRPCError iNVALID_PARAMS "Missing params"
 
-    -- Check if a RequestId is valid according to JSON-RPC 2.0 spec.
-    isValidRequestId :: RequestId -> Bool
-    isValidRequestId (RequestId v) =
-        case v of
-            Aeson.Number _ -> True
-            Aeson.String _ -> True
-            Aeson.Null -> True
-            _ -> False
+invalid_params :: String -> StateT MCPServerState IO (ProcessResult Aeson.Value)
+invalid_params = return . ProcessRPCError iNVALID_PARAMS . ("Invalid params: " <>) . T.pack
+
+server_not_initialized :: StateT MCPServerState IO (ProcessResult Aeson.Value)
+server_not_initialized = return $ ProcessRPCError (-32002) "Server not initialized"
+
+method_not_found :: StateT MCPServerState IO (ProcessResult Aeson.Value)
+method_not_found = return $ ProcessRPCError mETHOD_NOT_FOUND "Method not found"
+
+-- | Helper to run a process handler with argument parsing
+runProcessHandler ::
+    forall a b.
+    (Aeson.FromJSON a, Aeson.ToJSON b) =>
+    (ProcessHandlers -> Maybe (a -> MCPServerT (ProcessResult b))) ->
+    Aeson.Value ->
+    StateT MCPServerState IO (ProcessResult Aeson.Value)
+runProcessHandler _ Aeson.Null = missing_params
+runProcessHandler handler arg_value =
+    case fromJSON @a arg_value of
+        Aeson.Error err -> invalid_params err
+        Aeson.Success arg -> do
+            handlerImpl <- gets (handler . mcp_process_handlers)
+            case handlerImpl of
+                Just impl -> do
+                    impl_res <- runExceptT $ impl arg
+                    case impl_res of
+                        Left err -> return $ ProcessServerError err
+                        Right res -> return $ fmap toJSON res
+                Nothing -> method_not_found

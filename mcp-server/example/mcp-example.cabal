@@ -33,6 +33,9 @@ executable mcp-example
   main-is:
     Main.hs
 
+  ghc-options:
+    -threaded
+
   build-depends:
     aeson >=2.1 && <2.3,
     base >=4.18 && <4.22,

@@ -178,6 +178,21 @@ curl -s -X POST http://localhost:8080/mcp \
 | Lifecycle            | `initialize`, `notifications/initialized`    |
 | Health               | `ping`                                       |
 
+## Run the agent test (Claude Agent SDK)
+
+A Node.js test in `test/` uses the Claude Agent SDK to start the server and
+exercise every tool endpoint through a Claude agent.
+
+```bash
+cd mcp-server/example/test
+pnpm install
+pnpm test   # requires ANTHROPIC_API_KEY
+```
+
+The script starts the server, captures its JWT token, connects a Claude agent,
+and verifies that all 3 tool checks pass (echo, add, current-time).
+See `test/README.md` for details.
+
 ## Run the library tests
 
 ```bash

@@ -204,7 +204,17 @@ data JSONRPCRequest = JSONRPCRequest
     , params :: Value
     }
     deriving stock (Show, Eq, Generic)
-    deriving anyclass (FromJSON, ToJSON)
+    deriving anyclass (ToJSON)
+
+-- | Custom 'FromJSON' instance that treats a missing @params@ key as 'Null'.
+-- JSON-RPC 2.0 allows the @params@ field to be omitted.
+instance FromJSON JSONRPCRequest where
+    parseJSON = withObject "JSONRPCRequest" $ \o ->
+        JSONRPCRequest
+            <$> o .: "jsonrpc"
+            <*> o .: "id"
+            <*> o .: "method"
+            <*> o .:? "params" .!= Null
 
 -- | Type family to extract the type of the 'params' field from a generic representation.
 type family RequestParamType (rep :: Type -> Type) :: Type where
@@ -260,7 +270,7 @@ instance (IsJSONRPCRequest a) => FromJSON (ViaJSONRPCRequest a) where
         req_id <- o .: "id"
         if m == requestMethod (Proxy @a)
             then do
-                p <- o .: "params"
+                p <- o .:? "params" .!= Null
                 case fromJSONRPCRequest (JSONRPCRequest rPC_VERSION req_id m p) of
                     Right r -> return (ViaJSONRPCRequest r)
                     Left err -> fail $ "Failed to parse params for " <> show (typeRep (Proxy @a)) <> ": " <> err
@@ -300,7 +310,22 @@ data JSONRPCNotification = JSONRPCNotification
     , params :: Value
     }
     deriving stock (Show, Eq, Generic)
-    deriving anyclass (FromJSON, ToJSON)
+
+-- | Custom 'ToJSON' instance that omits @params@ when it is 'Null'.
+instance ToJSON JSONRPCNotification where
+    toJSON (JSONRPCNotification j m Null) =
+        object ["jsonrpc" .= j, "method" .= m]
+    toJSON (JSONRPCNotification j m p) =
+        object ["jsonrpc" .= j, "method" .= m, "params" .= p]
+
+-- | Custom 'FromJSON' instance that treats a missing @params@ key as 'Null'.
+-- JSON-RPC 2.0 allows notifications to omit the @params@ field entirely.
+instance FromJSON JSONRPCNotification where
+    parseJSON = withObject "JSONRPCNotification" $ \o ->
+        JSONRPCNotification
+            <$> o .: "jsonrpc"
+            <*> o .: "method"
+            <*> o .:? "params" .!= Null
 
 -- | Type family to extract the type of the 'params' field from a generic representation.
 type family NotificationParamType (rep :: Type -> Type) :: Type where
@@ -354,7 +379,7 @@ instance (IsJSONRPCNotification a) => FromJSON (ViaJSONRPCNotification a) where
         m <- o .: "method"
         if m == notificationsMethod (Proxy @a)
             then do
-                p <- o .: "params"
+                p <- o .:? "params" .!= Null
                 case fromJSONRPCNotification (JSONRPCNotification rPC_VERSION m p) of
                     Right r -> return (ViaJSONRPCNotification r)
                     Left err -> fail $ "Failed to parse params for " <> show (typeRep (Proxy @a)) <> ": " <> err

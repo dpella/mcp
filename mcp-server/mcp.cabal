@@ -66,7 +66,7 @@ library
     bytestring >=0.11 && <0.13,
     containers >=0.6 && <0.8,
     http-media >=0.8 && <0.9,
-    mcp-types >=2025.6.18 && <2026,
+    mcp-types >=0.1.0 && <0.2,
     mtl >=2.2 && <2.4,
     servant >=0.19 && <0.21,
     servant-auth-server >=0.4 && <0.5,
@@ -99,6 +99,7 @@ test-suite test-mcp
 
   other-modules:
     MCP.Integration
+    MCP.StdioIntegration
     MCP.TestServer
     MCP.TestUtils
 
@@ -112,9 +113,10 @@ test-suite test-mcp
     hspec-wai >=0.11 && <0.12,
     http-types >=0.12 && <0.13,
     jose >=0.10 && <0.12,
-    mcp-types >=2025.6.18 && <2026,
+    mcp-types >=0.1.0 && <0.2,
     mcp,
     mtl >=2.2 && <2.4,
+    process >=1.6 && <1.8,
     servant >=0.19 && <0.21,
     servant-auth-server >=0.4 && <0.5,
     servant-server >=0.19 && <0.21,

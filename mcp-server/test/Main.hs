@@ -12,6 +12,7 @@ Main test suite for the MCP library
 module Main where
 
 import MCP.Integration qualified as Integration
+import MCP.StdioIntegration qualified as StdioIntegration
 import Test.Hspec (describe, hspec)
 
 -- | Main function to run all tests
@@ -19,3 +20,4 @@ main :: IO ()
 main = hspec $ do
     describe "MCP Library" $ do
         Integration.integrationSpec
+        StdioIntegration.stdioIntegrationSpec

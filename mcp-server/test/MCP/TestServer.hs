@@ -91,8 +91,8 @@ processHandlers =
         , callToolHandler = Just processCallToolHandler
         , listPromptsHandler = Just processListPromptsHandler
         , getPromptHandler = Just processGetPromptHandler
-        , listResourceTemplatesHandler = Nothing
-        , completeHandler = Nothing
+        , listResourceTemplatesHandler = Just processListResourceTemplatesHandler
+        , completeHandler = Just processCompleteHandler
         }
   where
     -- Example process handler for listing resources
@@ -236,6 +236,52 @@ processHandlers =
                         }
         _ -> return $ ProcessRPCError 404 "Prompt not found"
 
+    -- Resource templates handler
+    processListResourceTemplatesHandler :: ListResourceTemplatesParams -> MCPServerT (ProcessResult ListResourceTemplatesResult)
+    processListResourceTemplatesHandler =
+        return $
+            return $
+                ProcessSuccess $
+                    ListResourceTemplatesResult
+                        { resourceTemplates = availableResourceTemplates
+                        , nextCursor = Nothing
+                        , _meta = Nothing
+                        }
+
+    -- Completion handler: prefix-based completions for the code-review prompt's "code" argument
+    processCompleteHandler :: CompleteParams -> MCPServerT (ProcessResult CompleteResult)
+    processCompleteHandler (CompleteParams cref (CompletionArgument arg_name arg_value) _ctx) =
+        case cref of
+            PromptRef (PromptReference _ "code-review" _) ->
+                case arg_name of
+                    "code" ->
+                        let suggestions = filter (T.isPrefixOf arg_value) completionValues
+                        in return $
+                            ProcessSuccess $
+                                CompleteResult
+                                    { completion =
+                                        CompletionResult
+                                            { values = suggestions
+                                            , total = Just (length suggestions)
+                                            , hasMore = Just False
+                                            }
+                                    , _meta = Nothing
+                                    }
+                    _ -> emptyCompletion
+            _ -> emptyCompletion
+      where
+        emptyCompletion =
+            return $
+                ProcessSuccess $
+                    CompleteResult
+                        { completion = CompletionResult{values = [], total = Just 0, hasMore = Just False}
+                        , _meta = Nothing
+                        }
+
+-- | Completion suggestion values for the code-review prompt
+completionValues :: [Text]
+completionValues = ["def foo():", "class MyClass:", "import os"]
+
 -- ** Available Tools
 
 -- | Tools available in the test server
@@ -347,6 +393,31 @@ availableResources =
         }
     ]
 
+-- ** Available Resource Templates
+
+-- | Resource templates available in the test server
+availableResourceTemplates :: [ResourceTemplate]
+availableResourceTemplates =
+    [ ResourceTemplate
+        { name = "user-profile"
+        , title = Just "User Profile Template"
+        , uriTemplate = "resource://example/users/{userId}"
+        , description = Just "Returns a user profile by ID"
+        , mimeType = Just "application/json"
+        , annotations = Nothing
+        , _meta = Nothing
+        }
+    , ResourceTemplate
+        { name = "log-file"
+        , title = Just "Log File Template"
+        , uriTemplate = "resource://example/logs/{date}"
+        , description = Just "Returns logs for a specific date"
+        , mimeType = Just "text/plain"
+        , annotations = Nothing
+        , _meta = Nothing
+        }
+    ]
+
 -- *** Sample Resource Contents
 
 -- | Sample CSV data for testing
@@ -378,7 +449,7 @@ createTestServerState = do
                     Just
                         (ResourcesCapability{listChanged = Nothing, subscribe = Nothing})
                 , tools = Just (ToolsCapability{listChanged = Just True})
-                , completions = Nothing
+                , completions = Just CompletionsCapability
                 , experimental = Nothing
                 }
     newMVar

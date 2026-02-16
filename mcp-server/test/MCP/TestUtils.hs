@@ -17,7 +17,7 @@ implementation.
 module MCP.TestUtils where
 
 import Crypto.JOSE.Error as Crypto
-import Data.Aeson (ToJSON, Value (..), encode, object, toJSON, (.=))
+import Data.Aeson (ToJSON, Value (..), encode, toJSON)
 import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as BSL
 import Data.Map qualified as Map
@@ -265,21 +265,22 @@ createSetLevelRequest req_id lvl =
         }
 
 -- | Create a JSON-RPC request for a resource template list
-createListResourceTemplatesRequest :: Int -> Value
+createListResourceTemplatesRequest :: Int -> MCP.ListResourceTemplatesRequest
 createListResourceTemplatesRequest req_id =
-    toJSON $
-        createJSONRPCRequest Nothing req_id "resources/templates/list" (object [])
+    MCP.ListResourceTemplatesRequest
+        { id = toRequestId req_id
+        , params = Just $ MCP.ListResourceTemplatesParams Nothing
+        }
 
 -- | Create a JSON-RPC request for completion/complete
-createCompleteRequest :: Int -> Text -> Text -> Text -> Value
-createCompleteRequest req_id ref_type ref_name arg_name =
-    toJSON $
-        createJSONRPCRequest
-            Nothing
-            req_id
-            "completion/complete"
-            ( object
-                [ "ref" .= object ["type" .= ref_type, "name" .= ref_name]
-                , "argument" .= object ["name" .= arg_name, "value" .= ("" :: Text)]
-                ]
-            )
+createCompleteRequest :: Int -> Text -> Text -> Text -> MCP.CompleteRequest
+createCompleteRequest req_id ref_name arg_name arg_value =
+    MCP.CompleteRequest
+        { id = toRequestId req_id
+        , params =
+            MCP.CompleteParams
+                { ref = MCP.PromptRef $ MCP.PromptReference "ref/prompt" ref_name Nothing
+                , argument = MCP.CompletionArgument arg_name arg_value
+                , context = Nothing
+                }
+        }
