@@ -1,6 +1,6 @@
 cabal-version: 2.2
-name: mcp-protocol
-version: 0.1.0.0
+name: mcp-types
+version: 2025.6.18
 license: MPL-2.0
 license-file: LICENSE
 copyright: (c) 2025 DPella AB
@@ -21,7 +21,7 @@ description:
   .
   This package contains only the pure protocol types with minimal dependencies,
   making it suitable for building both clients and servers on any framework.
-  For a ready-made Servant-based server, see the @mcp-server@ package.
+  For a ready-made Servant-based server, see the @mcp@ package.
 
 homepage: https://github.com/DPella/mcp
 bug-reports: https://github.com/DPella/mcp/issues

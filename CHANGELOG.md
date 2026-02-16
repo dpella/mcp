@@ -1,17 +1,17 @@
 # Changelog
 
-## 0.2.0.0 — Package Split
+## 0.3.0.1 — Package Split
 
 ### Changed
 - **Breaking**: Split `mcp` into two packages:
-  - `mcp-protocol`: Core protocol types (`MCP.Types`, `MCP.Protocol`, `MCP.Aeson`) with minimal dependencies.
-  - `mcp`: Servant-based server (`MCP.Server`) depending on `mcp-protocol`.
+  - `mcp-types`: Core protocol types (`MCP.Types`, `MCP.Protocol`, `MCP.Aeson`) with minimal dependencies.
+  - `mcp`: Servant-based server (`MCP.Server`) depending on `mcp-types`.
 - The `MCP` module has been renamed to `MCP.Server`.
-- `MCP.Aeson` is now an exposed module in `mcp-protocol` (was `other-modules`).
+- `MCP.Aeson` is now an exposed module in `mcp-types` (was `other-modules`).
 
 ### Migration
 1. Change `import MCP` to `import MCP.Server`.
-2. If you only need types, depend on `mcp-protocol` instead of `mcp`.
+2. If you only need types, depend on `mcp-types` instead of `mcp`.
 
 ## 0.1.0.0
 

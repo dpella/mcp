@@ -3,17 +3,17 @@
 This repository implements the Model Context Protocol (MCP) as two Haskell library packages using Servant. Follow these concise guidelines to contribute effectively.
 
 ## Project Structure & Module Organization
-- `mcp-protocol/src/`: Pure protocol types (`MCP.Types`, `MCP.Protocol`, `MCP.Aeson`).
-- `mcp/src/`: Server implementation (`MCP.Server`).
-- `mcp/test/`: Tests (hspec + hspec-wai integration tests).
-- Build files: `mcp-protocol/mcp-protocol.cabal`, `mcp/mcp.cabal`, `cabal.project`.
+- `mcp-types/src/`: Pure protocol types (`MCP.Types`, `MCP.Protocol`, `MCP.Aeson`).
+- `mcp-server/src/`: Server implementation (`MCP.Server`).
+- `mcp-server/test/`: Tests (hspec + hspec-wai integration tests).
+- Build files: `mcp-types/mcp-types.cabal`, `mcp-server/mcp.cabal`, `cabal.project`.
 - Expose or list new modules in the appropriate `.cabal` file (`exposed-modules` or `other-modules`).
 
 ## Build, Test, and Development Commands
 - `cabal build all` — build both packages and test suites.
 - `cabal test all` — run all tests (integration tests included).
 - `cabal repl mcp` — open a REPL for the server library.
-- `cabal repl mcp-protocol` — open a REPL for the protocol library.
+- `cabal repl mcp-types` — open a REPL for the protocol library.
 - Optional coverage: `cabal test --enable-coverage`.
 
 ## Coding Style & Naming Conventions
@@ -25,7 +25,7 @@ This repository implements the Model Context Protocol (MCP) as two Haskell libra
 
 ## Testing Guidelines
 - Frameworks: `hspec`, `hspec-wai`.
-- Place tests under `mcp/test/MCP/*`; add to `other-modules` in `mcp.cabal` if needed.
+- Place tests under `mcp-server/test/MCP/*`; add to `other-modules` in `mcp.cabal` if needed.
 - Aim to cover new endpoints/branches; prefer integration tests for protocol flows.
 - Run `cabal test all` before submitting; keep tests deterministic and hermetic (no network).
 

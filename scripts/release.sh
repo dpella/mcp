@@ -8,10 +8,10 @@ cabal sdist all
 read -p "Username: " username
 read -sp "Password: " password
 
-# Upload mcp-protocol first (mcp depends on it)
-cabal upload $1 -u "$username" -p "$password" dist-newstyle/sdist/mcp-protocol-*.tar.gz
-cabal upload $1 -d -u "$username" -p "$password" dist-newstyle/mcp-protocol-*-docs.tar.gz
+# Upload mcp-types first (mcp depends on it)
+cabal upload $1 -u "$username" -p "$password" dist-newstyle/sdist/mcp-types-*.tar.gz
+cabal upload $1 -d -u "$username" -p "$password" dist-newstyle/mcp-types-*-docs.tar.gz
 
 # Upload mcp (server)
-cabal upload $1 -u "$username" -p "$password" dist-newstyle/sdist/mcp-*.tar.gz
-cabal upload $1 -d -u "$username" -p "$password" dist-newstyle/mcp-*-docs.tar.gz
+cabal upload $1 -u "$username" -p "$password" dist-newstyle/sdist/mcp-0.*.tar.gz
+cabal upload $1 -d -u "$username" -p "$password" dist-newstyle/mcp-0.*-docs.tar.gz

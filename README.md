@@ -2,7 +2,7 @@
 
 A complete implementation of the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) for Haskell, split into two packages:
 
-- **`mcp-protocol`** — Pure protocol types with minimal dependencies (aeson, base, containers, text)
+- **`mcp-types`** — Pure protocol types with minimal dependencies (aeson, base, containers, text)
 - **`mcp`** — Servant-based HTTP server with JWT authentication
 
 ## Overview
@@ -23,7 +23,7 @@ This repository provides a type-safe implementation of the Model Context Protoco
 
 The implementation is organized into two packages:
 
-### `mcp-protocol`
+### `mcp-types`
 
 Core protocol types with minimal dependencies — suitable for building clients or alternative server implementations.
 
@@ -72,13 +72,13 @@ build-depends:
   , mcp
 ```
 
-If you only need the protocol types (e.g. for a client), depend on `mcp-protocol` instead:
+If you only need the protocol types (e.g. for a client), depend on `mcp-types` instead:
 
 ```cabal
 build-depends:
     base
   , aeson
-  , mcp-protocol
+  , mcp-types
 ```
 
 This project targets GHC 9.12 (see `cabal.project`).
@@ -123,14 +123,14 @@ myTools =
 ## Project Structure
 
 ```
-mcp-protocol/               # Core protocol types package
+mcp-types/               # Core protocol types package
 ├── src/MCP/
 │   ├── Aeson.hs             # Custom Aeson parsing options
 │   ├── Protocol.hs          # JSON-RPC protocol messages
 │   └── Types.hs             # Core MCP data types
-└── mcp-protocol.cabal
+└── mcp-types.cabal
 
-mcp/                  # Server implementation package
+mcp-server/               # Server implementation package
 ├── src/MCP/
 │   └── Server.hs            # Server infrastructure and Servant API
 ├── test/

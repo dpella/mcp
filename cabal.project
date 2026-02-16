@@ -1,9 +1,6 @@
 packages:
-  mcp-protocol/mcp-protocol.cabal
+  mcp-types/mcp-types.cabal
   mcp-server/mcp.cabal
-
--- oauth-server is not on hackage yet
-packages: ../oauth-server/*.cabal
 
 -- GHC version
 with-compiler: ghc-9.12.2

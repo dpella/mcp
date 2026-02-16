@@ -1,6 +1,6 @@
 cabal-version: 2.2
 name: mcp
-version: 0.1.0.0
+version: 0.3.0.1
 license: MPL-2.0
 license-file: LICENSE
 copyright: (c) 2025 DPella AB
@@ -18,7 +18,7 @@ description:
   This library provides a complete server implementation of the Model Context
   Protocol (MCP) for Haskell, built on Servant with JWT authentication via
   @servant-auth-server@. It re-exports the core protocol types from
-  @mcp-protocol@ for convenience.
+  @mcp-types@ for convenience.
   .
   MCP is a protocol that enables seamless communication between AI models and
   external tools, resources, and services. This implementation supports MCP
@@ -66,7 +66,7 @@ library
     bytestring >=0.11 && <0.13,
     containers >=0.6 && <0.8,
     http-media >=0.8 && <0.9,
-    mcp-protocol,
+    mcp-types,
     mtl >=2.2 && <2.4,
     servant >=0.19 && <0.21,
     servant-auth-server >=0.4 && <0.5,
@@ -112,7 +112,7 @@ test-suite test-mcp
     hspec-wai >=0.11 && <0.12,
     http-types >=0.12 && <0.13,
     jose >=0.10 && <0.12,
-    mcp-protocol,
+    mcp-types,
     mcp,
     mtl >=2.2 && <2.4,
     servant >=0.19 && <0.21,
