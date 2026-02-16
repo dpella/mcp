@@ -126,8 +126,11 @@ handleMCPRequest state_var auth_result request_value =
                     liftIO $ readMVar state_var
                 case log_level of
                     Nothing -> return ()
-                    Just level -> when (level >= Debug) $
-                        liftIO $ BSL.putStrLn $ "[request] " <> encode request_value
+                    Just level ->
+                        when (level >= Debug) $
+                            liftIO $
+                                BSL.putStrLn $
+                                    "[request] " <> encode request_value
 
                 case request_value of
                     NotificationMessage _ ->

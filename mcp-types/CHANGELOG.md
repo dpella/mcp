@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1
+
+### Added
+- `sERVER_NOT_INITIALIZED` error code constant (-32002) in `MCP.Protocol`.
+
 ## 0.1.0
 
 ### Added

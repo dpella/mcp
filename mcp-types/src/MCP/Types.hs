@@ -21,6 +21,7 @@ tools, prompts, and various request/response types.
 module MCP.Types (
     -- * Basic Types (re-exported from JSONRPC)
     RequestId (..),
+
     -- * Basic Types
     Role (..),
     Cursor (..),

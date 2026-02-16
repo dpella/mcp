@@ -255,17 +255,17 @@ processHandlers =
                 case arg_name of
                     "code" ->
                         let suggestions = filter (T.isPrefixOf arg_value) completionValues
-                        in return $
-                            ProcessSuccess $
-                                CompleteResult
-                                    { completion =
-                                        CompletionResult
-                                            { values = suggestions
-                                            , total = Just (length suggestions)
-                                            , hasMore = Just False
-                                            }
-                                    , _meta = Nothing
-                                    }
+                         in return $
+                                ProcessSuccess $
+                                    CompleteResult
+                                        { completion =
+                                            CompletionResult
+                                                { values = suggestions
+                                                , total = Just (length suggestions)
+                                                , hasMore = Just False
+                                                }
+                                        , _meta = Nothing
+                                        }
                     _ -> emptyCompletion
             _ -> emptyCompletion
       where

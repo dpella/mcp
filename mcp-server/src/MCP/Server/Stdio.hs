@@ -148,7 +148,7 @@ serveStdio h_in h_out initial_state = do
                                     h_st' <- finalizer (mcp_handler_state st)
                                     writeIORef state_ref st{mcp_handler_state = h_st'}
 
-    -- | Resolve ProcessClientInput by writing a request to the client and
+    -- \| Resolve ProcessClientInput by writing a request to the client and
     -- reading the response synchronously from stdin.
     resolveClientInput :: IORef MCPServerState -> ProcessResult Aeson.Value -> IO (ProcessResult Aeson.Value)
     resolveClientInput state_ref = \case

@@ -26,6 +26,10 @@ import Data.ByteString.Lazy qualified as BSL
 import Data.Map qualified as Map
 import Data.Text (Text)
 import MCP.Protocol
+import MCP.Server (
+    MCPServerState (..),
+    serveStdio,
+ )
 import MCP.TestServer (
     availableResourceTemplates,
     completionValues,
@@ -36,11 +40,7 @@ import MCP.TestServer (
  )
 import MCP.TestUtils
 import MCP.Types
-import MCP.Server (
-    MCPServerState (..),
-    serveStdio,
- )
-import System.IO (Handle, hClose, hFlush, hSetBuffering, BufferMode(..))
+import System.IO (BufferMode (..), Handle, hClose, hFlush, hSetBuffering)
 import System.Process (createPipe)
 import Test.Hspec
 
@@ -87,8 +87,9 @@ createStdioServerState =
         , mcp_process_handlers = processHandlers
         }
 
--- | Bracket that creates pipes, starts the stdio server in a background
--- thread, and yields the client-side handles for reading/writing.
+{- | Bracket that creates pipes, starts the stdio server in a background
+thread, and yields the client-side handles for reading/writing.
+-}
 withStdioServer ::
     ((Handle, Handle) -> IO a) ->
     IO a

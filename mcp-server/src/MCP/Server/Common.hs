@@ -81,18 +81,19 @@ data ProcessResult a where
     ProcessRPCError :: Int -> Text -> ProcessResult a
     -- | Successful result
     ProcessSuccess :: a -> ProcessResult a
-    -- | Request additional information from the client before completing.
-    --
-    -- This allows a handler to send a JSON-RPC request back to the client
-    -- (e.g. @sampling\/createMessage@ or @elicitation\/create@) and resume
-    -- processing once the client responds.
-    --
-    -- Supported on both transports:
-    --
-    -- * __HTTP__: the request is yielded as an SSE event; the server blocks
-    --   (via 'MVar') until the client POSTs a matching response.
-    -- * __Stdio__: the request is written to stdout and the response is read
-    --   synchronously from stdin (blocks until the client responds).
+    {- | Request additional information from the client before completing.
+
+    This allows a handler to send a JSON-RPC request back to the client
+    (e.g. @sampling\/createMessage@ or @elicitation\/create@) and resume
+    processing once the client responds.
+
+    Supported on both transports:
+
+    * __HTTP__: the request is yielded as an SSE event; the server blocks
+    (via 'MVar') until the client POSTs a matching response.
+    * __Stdio__: the request is written to stdout and the response is read
+    synchronously from stdin (blocks until the client responds).
+    -}
     ProcessClientInput ::
         -- | JSON-RPC method name for the client request
         Text ->
@@ -345,8 +346,9 @@ data MCPServerState = MCPServerState
     -- ^ Handlers for MCP methods
     }
 
--- | Normalize @_meta@ fields in JSON-RPC responses.
--- Promotes the contents of @_meta@ objects up one level and removes the @_meta@ key.
+{- | Normalize @_meta@ fields in JSON-RPC responses.
+Promotes the contents of @_meta@ objects up one level and removes the @_meta@ key.
+-}
 recurReplaceMeta :: Aeson.Value -> Aeson.Value
 recurReplaceMeta (Aeson.Array arr) =
     Aeson.Array $ fmap recurReplaceMeta arr
