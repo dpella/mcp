@@ -1,47 +1,31 @@
 {-# HLINT ignore "Use newtype instead of data" #-}
-{-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE DuplicateRecordFields #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 
 {- |
 Module      : MCP.Protocol
-Description : JSON-RPC protocol implementation for MCP
+Description : MCP protocol types built on JSON-RPC 2.0
 Copyright   : (C) 2025 DPella AB
 License     : MPL-2.0
 Maintainer  : matti@dpella.io, lobo@dpella.io
 Stability   : experimental
 Portability : GHC
 
-This module implements the JSON-RPC 2.0 protocol layer for MCP,
-including request/response handling, message parsing and encoding,
-and protocol-level error handling.
+This module defines the Model Context Protocol (MCP) request, response,
+and notification types.  The underlying JSON-RPC 2.0 transport types are
+re-exported from the @jsonrpc@ package.
 -}
 module MCP.Protocol (
-    -- * Type Classes
-    IsJSONRPCRequest (..),
-    IsJSONRPCNotification (..),
-
-    -- * JSON-RPC Types
-    JSONRPCRequest (..),
-    JSONRPCResponse (..),
-    JSONRPCError (..),
-    JSONRPCNotification (..),
-    JSONRPCMessage (..),
-    JSONRPCErrorInfo (..),
+    -- * JSON-RPC types (re-exported from "JSONRPC")
+    module JSONRPC,
 
     -- * Client Request Types
     InitializeRequest (..),
@@ -120,294 +104,19 @@ module MCP.Protocol (
     ClientNotification (..),
     ServerNotification (..),
 
-    -- * Standard JSON-RPC error codes
-    pARSE_ERROR,
-    iNVALID_REQUEST,
-    mETHOD_NOT_FOUND,
-    iNVALID_PARAMS,
-    iNTERNAL_ERROR,
-
-    -- * Constants
+    -- * MCP Constants
     pROTOCOL_VERSION,
-    rPC_VERSION,
 ) where
 
 import Control.Applicative ((<|>))
 import Data.Aeson
-import Data.Aeson qualified as Aeson
 import Data.Aeson.TH
-import Data.Data (Proxy (..), Typeable, typeRep)
-import Data.Kind (Type)
 import Data.Map (Map)
 import Data.Text (Text)
 import GHC.Generics
-import GHC.Records (HasField (getField))
-import GHC.TypeError (ErrorMessage (..), TypeError)
+import JSONRPC
 import MCP.Aeson
 import MCP.Types
-
-{- | JSON-RPC protocol version string.
-
-Indicates the version of the JSON-RPC protocol being used.
--}
-rPC_VERSION :: Text
-rPC_VERSION = "2.0"
-
--- | Type that represents an empty set of parameters.
-data EmptyParams
-    deriving stock (Generic)
-
-instance Show EmptyParams where
-    show :: EmptyParams -> String
-    show _ = show Aeson.Null
-
-instance Eq EmptyParams where
-    (==) :: EmptyParams -> EmptyParams -> Bool
-    _ == _ = True
-
-instance ToJSON EmptyParams where
-    toJSON :: EmptyParams -> Value
-    toJSON _ = Aeson.Null
-
-instance FromJSON EmptyParams where
-    parseJSON _ = fail "EmptyParams can only be used as a placeholder for empty params"
-
--- * JSON-RPC Types
-
-{- | JSON-RPC error information.
-
-Contains the error details for a JSON-RPC error response.
--}
-data JSONRPCErrorInfo = JSONRPCErrorInfo
-    { code :: Int
-    -- ^ The error type that occurred.
-    , message :: Text
-    {- ^ A short description of the error. The message SHOULD be limited
-    to a concise single sentence.
-    -}
-    , errorData :: Maybe Value
-    {- ^ Additional information about the error. The value of this member
-    is defined by the sender (e.g. detailed error information, nested errors etc.).
-    -}
-    }
-    deriving stock (Show, Eq, Generic)
-    deriving anyclass (FromJSON, ToJSON)
-
-{- | A JSON-RPC request that expects a response.
-
-Represents a request message in the JSON-RPC 2.0 protocol.
--}
-data JSONRPCRequest = JSONRPCRequest
-    { jsonrpc :: Text -- Always "2.0"
-    , id :: RequestId
-    , method :: Text
-    , params :: Value
-    }
-    deriving stock (Show, Eq, Generic)
-    deriving anyclass (ToJSON)
-
--- | Custom 'FromJSON' instance that treats a missing @params@ key as 'Null'.
--- JSON-RPC 2.0 allows the @params@ field to be omitted.
-instance FromJSON JSONRPCRequest where
-    parseJSON = withObject "JSONRPCRequest" $ \o ->
-        JSONRPCRequest
-            <$> o .: "jsonrpc"
-            <*> o .: "id"
-            <*> o .: "method"
-            <*> o .:? "params" .!= Null
-
--- | Type family to extract the type of the 'params' field from a generic representation.
-type family RequestParamType (rep :: Type -> Type) :: Type where
-    RequestParamType (D1 _ (C1 _ (S1 _ (K1 _ RequestId) :*: S1 _ (K1 _ p)))) = p
-    RequestParamType (D1 ('MetaData nm _ _ _) _) =
-        TypeError
-            ( ('Text "Error when defining IsJSONRPCRequest for " :<>: 'Text nm :<>: 'Text ":")
-                :$$: 'Text "The request datatype must be a record with fields 'id' and 'params'"
-            )
-
--- | A type class for types that can be converted to/from JSON-RPC requests.
-class
-    ( HasField "id" a RequestId
-    , HasField "params" a (RequestParams a)
-    , Typeable a
-    , ToJSON (RequestParams a)
-    , FromJSON (RequestParams a)
-    ) =>
-    IsJSONRPCRequest a
-    where
-    type RequestParams a
-    type RequestParams a = RequestParamType (Rep a)
-    requestMethod :: Proxy a -> Text
-
-    toJSONRPCRequest :: a -> JSONRPCRequest
-    toJSONRPCRequest (req :: a) =
-        JSONRPCRequest rPC_VERSION (getField @"id" req) (requestMethod (Proxy @a)) (toJSON (getField @"params" req))
-
-    fromJSONRPCRequest :: JSONRPCRequest -> Either String a
-    default fromJSONRPCRequest ::
-        ( Generic a
-        , -- Here we're saying that the generic representation of 'a' must be a record
-          -- with two fields: one for RequestId and one for RequestParams a
-          Rep a ~ D1 c0 (C1 i0 (S1 s0 (K1 i1 RequestId) :*: S1 s1 (K1 i30 (RequestParams a))))
-        ) =>
-        JSONRPCRequest ->
-        Either String a
-    fromJSONRPCRequest JSONRPCRequest{id = req_id, params = req_params} =
-        case fromJSON @(RequestParams a) req_params of
-            -- If parsing the params succeeds, construct the record using the generic representation,
-            -- i.e. use the constructor of 'a' with the parsed params and req_id
-            Success p -> Right $ to $ M1 (M1 (M1 (K1 req_id) :*: M1 (K1 p)))
-            Aeson.Error err -> Left err
-
-newtype ViaJSONRPCRequest a = ViaJSONRPCRequest {unViaJSONRPCRequest :: a}
-
-instance (IsJSONRPCRequest a) => ToJSON (ViaJSONRPCRequest a) where
-    toJSON = toJSON . toJSONRPCRequest . unViaJSONRPCRequest
-
-instance (IsJSONRPCRequest a) => FromJSON (ViaJSONRPCRequest a) where
-    parseJSON = withObject (show $ typeRep (Proxy @a)) $ \o -> do
-        m <- o .: "method"
-        req_id <- o .: "id"
-        if m == requestMethod (Proxy @a)
-            then do
-                p <- o .:? "params" .!= Null
-                case fromJSONRPCRequest (JSONRPCRequest rPC_VERSION req_id m p) of
-                    Right r -> return (ViaJSONRPCRequest r)
-                    Left err -> fail $ "Failed to parse params for " <> show (typeRep (Proxy @a)) <> ": " <> err
-            else fail $ "Expected method '" <> show (requestMethod (Proxy @a)) <> "'"
-
-{- | A successful (non-error) response to a request.
-
-Represents a successful response message in the JSON-RPC 2.0 protocol.
--}
-data JSONRPCResponse = JSONRPCResponse
-    { jsonrpc :: Text -- Always "2.0"
-    , id :: RequestId
-    , result :: Value
-    }
-    deriving stock (Show, Eq, Generic)
-    deriving anyclass (FromJSON, ToJSON)
-
-{- | A response to a request that indicates an error occurred.
-
-Represents an error response message in the JSON-RPC 2.0 protocol.
--}
-data JSONRPCError = JSONRPCError
-    { jsonrpc :: Text -- Always "2.0"
-    , id :: RequestId
-    , error :: JSONRPCErrorInfo
-    }
-    deriving stock (Show, Eq, Generic)
-    deriving anyclass (FromJSON, ToJSON)
-
-{- | A notification which does not expect a response.
-
-Represents a notification message in the JSON-RPC 2.0 protocol.
--}
-data JSONRPCNotification = JSONRPCNotification
-    { jsonrpc :: Text -- Always "2.0"
-    , method :: Text
-    , params :: Value
-    }
-    deriving stock (Show, Eq, Generic)
-
--- | Custom 'ToJSON' instance that omits @params@ when it is 'Null'.
-instance ToJSON JSONRPCNotification where
-    toJSON (JSONRPCNotification j m Null) =
-        object ["jsonrpc" .= j, "method" .= m]
-    toJSON (JSONRPCNotification j m p) =
-        object ["jsonrpc" .= j, "method" .= m, "params" .= p]
-
--- | Custom 'FromJSON' instance that treats a missing @params@ key as 'Null'.
--- JSON-RPC 2.0 allows notifications to omit the @params@ field entirely.
-instance FromJSON JSONRPCNotification where
-    parseJSON = withObject "JSONRPCNotification" $ \o ->
-        JSONRPCNotification
-            <$> o .: "jsonrpc"
-            <*> o .: "method"
-            <*> o .:? "params" .!= Null
-
--- | Type family to extract the type of the 'params' field from a generic representation.
-type family NotificationParamType (rep :: Type -> Type) :: Type where
-    NotificationParamType (D1 _ (C1 _ (S1 _ (K1 _ p)))) = p
-    NotificationParamType (D1 ('MetaData nm _ _ _) _) =
-        TypeError
-            ( ('Text "Error when defining IsJSONRPCNotification for " :<>: 'Text nm :<>: 'Text ":")
-                :$$: 'Text "The notification datatype must be a record with a single field 'params'"
-            )
-
--- | A type class for types that can be converted to/from JSON-RPC requests.
-class
-    ( HasField "params" a (NotificationParams a)
-    , Typeable a
-    , ToJSON (NotificationParams a)
-    , FromJSON (NotificationParams a)
-    ) =>
-    IsJSONRPCNotification a
-    where
-    type NotificationParams a
-    type NotificationParams a = NotificationParamType (Rep a)
-    notificationsMethod :: Proxy a -> Text
-
-    toJSONRPCNotification :: a -> JSONRPCNotification
-    toJSONRPCNotification (req :: a) =
-        JSONRPCNotification rPC_VERSION (notificationsMethod (Proxy @a)) (toJSON (getField @"params" req))
-
-    fromJSONRPCNotification :: JSONRPCNotification -> Either String a
-    default fromJSONRPCNotification ::
-        ( Generic a
-        , -- Here we're saying that the generic representation of 'a' must be a record
-          -- with one field, which is the NotificationParams a
-          Rep a ~ D1 c0 (C1 i0 (S1 s1 (K1 i30 (NotificationParams a))))
-        ) =>
-        JSONRPCNotification ->
-        Either String a
-    fromJSONRPCNotification JSONRPCNotification{params = notification_params} =
-        case fromJSON @(NotificationParams a) notification_params of
-            -- If parsing the params succeeds, construct the record using the generic representation,
-            -- i.e. use the constructor of 'a' with the parsed params
-            Success p -> Right $ to $ M1 (M1 (M1 (K1 p)))
-            Aeson.Error err -> Left err
-
-newtype ViaJSONRPCNotification a = ViaJSONRPCNotification {unViaJSONRPCNotification :: a}
-
-instance (IsJSONRPCNotification a) => ToJSON (ViaJSONRPCNotification a) where
-    toJSON = toJSON . toJSONRPCNotification . unViaJSONRPCNotification
-
-instance (IsJSONRPCNotification a) => FromJSON (ViaJSONRPCNotification a) where
-    parseJSON = withObject (show $ typeRep (Proxy @a)) $ \o -> do
-        m <- o .: "method"
-        if m == notificationsMethod (Proxy @a)
-            then do
-                p <- o .:? "params" .!= Null
-                case fromJSONRPCNotification (JSONRPCNotification rPC_VERSION m p) of
-                    Right r -> return (ViaJSONRPCNotification r)
-                    Left err -> fail $ "Failed to parse params for " <> show (typeRep (Proxy @a)) <> ": " <> err
-            else fail $ "Expected method '" <> show (notificationsMethod (Proxy @a)) <> "'"
-
-{- | Any valid JSON-RPC message that can be decoded off the wire, or encoded to be sent.
-
-Refers to any valid JSON-RPC object that can be processed by the protocol layer.
--}
-data JSONRPCMessage
-    = RequestMessage JSONRPCRequest
-    | ResponseMessage JSONRPCResponse
-    | ErrorMessage JSONRPCError
-    | NotificationMessage JSONRPCNotification
-    deriving stock (Show, Eq, Generic)
-
-instance ToJSON JSONRPCMessage where
-    toJSON (RequestMessage r) = toJSON r
-    toJSON (ResponseMessage r) = toJSON r
-    toJSON (ErrorMessage e) = toJSON e
-    toJSON (NotificationMessage n) = toJSON n
-
-instance FromJSON JSONRPCMessage where
-    parseJSON v =
-        (RequestMessage <$> parseJSON v)
-            <|> (ResponseMessage <$> parseJSON v)
-            <|> (ErrorMessage <$> parseJSON v)
-            <|> (NotificationMessage <$> parseJSON v)
 
 -- * Client Request Types
 
@@ -1402,42 +1111,6 @@ instance FromJSON ServerNotification where
             <|> (PromptListChangedNotif <$> parseJSON v)
             <|> (ToolListChangedNotif <$> parseJSON v)
             <|> (LoggingMessageNotif <$> parseJSON v)
-
-{- | JSON-RPC parse error.
-
-Invalid JSON was received by the server.
-An error occurred on the server while parsing the JSON text.
--}
-pARSE_ERROR :: Int
-pARSE_ERROR = -32700
-
-{- | JSON-RPC invalid request error.
-
-The JSON sent is not a valid Request object.
--}
-iNVALID_REQUEST :: Int
-iNVALID_REQUEST = -32600
-
-{- | JSON-RPC method not found error.
-
-The method does not exist or is not available.
--}
-mETHOD_NOT_FOUND :: Int
-mETHOD_NOT_FOUND = -32601
-
-{- | JSON-RPC invalid params error.
-
-Invalid method parameter(s).
--}
-iNVALID_PARAMS :: Int
-iNVALID_PARAMS = -32602
-
-{- | JSON-RPC internal error.
-
-Internal JSON-RPC error.
--}
-iNTERNAL_ERROR :: Int
-iNTERNAL_ERROR = -32603
 
 {- | MCP protocol version string.
 

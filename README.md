@@ -1,5 +1,8 @@
 # DPella MCP — Model Context Protocol for Haskell
 
+[![mcp on Hackage](https://img.shields.io/hackage/v/mcp.svg)](https://hackage.haskell.org/package/mcp)
+[![mcp-types on Hackage](https://img.shields.io/hackage/v/mcp-types.svg)](https://hackage.haskell.org/package/mcp-types)
+
 A complete implementation of the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) for Haskell, split into two packages:
 
 - **`mcp-types`** — Pure protocol types with minimal dependencies (aeson, base, containers, text)

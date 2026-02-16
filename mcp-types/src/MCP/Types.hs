@@ -20,8 +20,9 @@ including JSON-RPC message types, client/server capabilities, resources,
 tools, prompts, and various request/response types.
 -}
 module MCP.Types (
-    -- * Basic Types
+    -- * Basic Types (re-exported from JSONRPC)
     RequestId (..),
+    -- * Basic Types
     Role (..),
     Cursor (..),
     ProgressToken (..),
@@ -94,17 +95,8 @@ import Data.Aeson.TH
 import Data.Map (Map)
 import Data.Text (Text)
 import GHC.Generics
+import JSONRPC (RequestId (..))
 import MCP.Aeson
-
-{- | A uniquely identifying ID for a request in JSON-RPC.
-
-This corresponds to the JSON-RPC 2.0 specification requirement that each
-request must have a unique identifier. The ID can be a string, number,
-or null value as per the JSON-RPC spec.
--}
-newtype RequestId = RequestId Value
-    deriving stock (Show, Eq)
-    deriving newtype (ToJSON, FromJSON)
 
 {- | The sender or recipient of messages and data in a conversation.
 
