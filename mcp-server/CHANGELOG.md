@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.1.0
+
+### Added
+- Simple unauthenticated HTTP transport (`SimpleHTTPAPI` / `simpleHttpApp`) in
+  `MCP.Server.HTTP`, for local development or use behind a reverse proxy.
+- `MCP.Server.HTTP.Internal`: shared handler core factored out of the HTTP
+  transport, eliminating duplication between the JWT and simple transports.
+- `--simple-http` flag in the example server.
+- Integration tests for the simple HTTP transport.
+
 ## 0.3.0.1
 
 ### Added

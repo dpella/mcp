@@ -1,6 +1,6 @@
 cabal-version: 2.2
 name: mcp
-version: 0.3.0.1
+version: 0.3.1.0
 license: MPL-2.0
 license-file: LICENSE
 copyright: (c) 2025 DPella AB
@@ -17,18 +17,21 @@ maintainer:
 synopsis: A Servant-based Model Context Protocol (MCP) server for Haskell
 description:
   This library provides a complete server implementation of the Model Context
-  Protocol (MCP) for Haskell, built on Servant with JWT authentication via
-  @servant-auth-server@. It re-exports the core protocol types from
-  @mcp-types@ for convenience.
+  Protocol (MCP) for Haskell, built on Servant. It re-exports the core
+  protocol types from @mcp-types@ for convenience.
   .
   MCP is a protocol that enables seamless communication between AI models and
   external tools, resources, and services. This implementation supports MCP
   protocol version 2025-06-18 with full compatibility for resources, tools,
   prompts, completions, elicitation, and all standard MCP message types.
   .
-  The server uses HTTP transport with streaming SSE responses at the @/mcp@
-  endpoint. An extensible handler framework (@ProcessHandlers@, @ToolHandler@)
-  allows implementing custom MCP servers with minimal boilerplate.
+  Three transports are provided: HTTP with JWT authentication via
+  @servant-auth-server@, a simple unauthenticated HTTP transport for local
+  development or use behind a reverse proxy, and a stdio transport for
+  subprocess-based integrations.  All HTTP transports use streaming SSE
+  responses at the @/mcp@ endpoint. An extensible handler framework
+  (@ProcessHandlers@, @ToolHandler@) allows implementing custom MCP servers
+  with minimal boilerplate.
 
 homepage: https://github.com/DPella/mcp
 bug-reports: https://github.com/DPella/mcp/issues
@@ -62,6 +65,7 @@ library
     MCP.Server
     MCP.Server.Common
     MCP.Server.HTTP
+    MCP.Server.HTTP.Internal
     MCP.Server.Stdio
 
   build-depends:
@@ -77,6 +81,7 @@ library
     servant-server >=0.19 && <0.21,
     text >=2.0 && <2.2,
     time >=1.12 && <1.15,
+    wai >=3.2 && <3.3,
 
 test-suite test-mcp
   type: exitcode-stdio-1.0
@@ -103,6 +108,7 @@ test-suite test-mcp
 
   other-modules:
     MCP.Integration
+    MCP.SimpleHTTPIntegration
     MCP.StdioIntegration
     MCP.TestServer
     MCP.TestUtils

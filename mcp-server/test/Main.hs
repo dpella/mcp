@@ -11,6 +11,7 @@ Main test suite for the MCP library
 module Main where
 
 import MCP.Integration qualified as Integration
+import MCP.SimpleHTTPIntegration qualified as SimpleHTTPIntegration
 import MCP.StdioIntegration qualified as StdioIntegration
 import Test.Hspec (describe, hspec)
 
@@ -19,4 +20,5 @@ main :: IO ()
 main = hspec $ do
     describe "MCP Library" $ do
         Integration.integrationSpec
+        SimpleHTTPIntegration.simpleHTTPIntegrationSpec
         StdioIntegration.stdioIntegrationSpec

@@ -3,7 +3,7 @@
  * Test the example MCP server using the Claude Agent SDK.
  *
  * Builds the example server once, then exercises every tool endpoint
- * over both HTTP and stdio transports.
+ * over HTTP (JWT), simple HTTP (unauthenticated), and stdio transports.
  *
  * Usage:
  *   # From the repository root:
@@ -155,6 +155,101 @@ function startServer(repoRoot, port) {
       if (!token) {
         clearInterval(check);
         reject(new Error(`Server exited with code ${code} before printing token`));
+      }
+    });
+  });
+}
+
+function startSimpleHTTPServer(repoRoot, port) {
+  return new Promise((resolve, reject) => {
+    console.log(`  repo root: ${repoRoot}`);
+    console.log(`  port:      ${port}`);
+    const serverBin = getServerBin(repoRoot);
+    console.log(`  binary:    ${serverBin}`);
+
+    const proc = spawn(serverBin, ["--simple-http"], {
+      cwd: repoRoot,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, PORT: String(port) },
+    });
+
+    proc.stderr.on("data", (chunk) => {
+      for (const line of chunk.toString().split("\n").filter(Boolean)) {
+        console.log(`  [server:stderr] ${line}`);
+      }
+    });
+
+    let ready = false;
+    const deadline = Date.now() + 30_000;
+    console.log("  Waiting for simple HTTP server to start...");
+
+    let buf = "";
+    proc.stdout.on("data", (chunk) => {
+      buf += chunk.toString();
+      const lines = buf.split("\n");
+      buf = lines.pop(); // keep incomplete trailing line
+      for (const raw of lines) {
+        const line = raw.trim();
+        console.log(`  [server:stdout] ${line}`);
+        if (!ready && line.includes("Listening on")) {
+          ready = true;
+        }
+      }
+    });
+
+    const check = setInterval(() => {
+      if (ready) {
+        clearInterval(check);
+        // Give the server a moment to finish binding.
+        setTimeout(() => verifyAndResolve(), 1000);
+      } else if (Date.now() > deadline) {
+        clearInterval(check);
+        proc.kill();
+        reject(new Error("Timed out waiting for simple HTTP server"));
+      }
+    }, 200);
+
+    function verifyAndResolve() {
+      console.log("  Verifying server is reachable...");
+      const body = JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "ping",
+      });
+      const req = http.request(
+        {
+          hostname: "localhost",
+          port,
+          path: "/mcp",
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+        (res) => {
+          let data = "";
+          res.on("data", (c) => (data += c));
+          res.on("end", () => {
+            console.log(`  Server responded: ${data.slice(0, 200)}`);
+            resolve({ proc });
+          });
+        },
+      );
+      req.on("error", (e) => {
+        proc.kill();
+        reject(new Error(`Server not reachable on port ${port}: ${e.message}`));
+      });
+      req.end(body);
+    }
+
+    proc.on("error", (err) => {
+      clearInterval(check);
+      reject(err);
+    });
+    proc.on("exit", (code) => {
+      if (!ready) {
+        clearInterval(check);
+        reject(new Error(`Server exited with code ${code} before becoming ready`));
       }
     });
   });
@@ -328,6 +423,33 @@ async function testHTTP(repoRoot) {
   }
 }
 
+async function testSimpleHTTP(repoRoot) {
+  const port = await getFreePort();
+  console.log(`Starting simple HTTP MCP server on port ${port}...`);
+  const { proc } = await startSimpleHTTPServer(repoRoot, port);
+  console.log("Server started (no auth).");
+
+  try {
+    console.log("\nRunning simple HTTP agent tests...");
+    const output = await runAgent({
+      "mcp-example": {
+        type: "http",
+        url: `http://localhost:${port}/mcp`,
+      },
+    });
+
+    console.log("\n--- Simple HTTP agent output ---");
+    console.log(output);
+    console.log("--- End simple HTTP agent output ---\n");
+
+    console.log("Simple HTTP results:");
+    return evaluate(output);
+  } finally {
+    console.log("\nStopping simple HTTP server...");
+    stopServer(proc);
+  }
+}
+
 async function testStdio(serverBin) {
   console.log("\nRunning stdio agent tests...");
   console.log(`  binary: ${serverBin}`);
@@ -364,7 +486,7 @@ async function main() {
     process.exit(1);
   }
 
-  // Build once, reuse for both transports.
+  // Build once, reuse for all transports.
   buildServer(repoRoot);
   const serverBin = getServerBin(repoRoot);
 
@@ -374,6 +496,13 @@ async function main() {
   // --- HTTP ---
   {
     const { passed, failed } = await testHTTP(repoRoot);
+    totalPassed += passed;
+    totalFailed += failed;
+  }
+
+  // --- Simple HTTP ---
+  {
+    const { passed, failed } = await testSimpleHTTP(repoRoot);
     totalPassed += passed;
     totalFailed += failed;
   }

@@ -4,7 +4,7 @@
 
 A complete server implementation of the
 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) for Haskell,
-built on Servant with JWT authentication via `servant-auth-server`.
+built on Servant.
 
 Implements MCP protocol version **2025-06-18**. Re-exports the core protocol types from
 [`mcp-types`](https://hackage.haskell.org/package/mcp-types) for convenience.
@@ -14,8 +14,11 @@ Implements MCP protocol version **2025-06-18**. Re-exports the core protocol typ
 - **`MCP.Server`** — Re-exports everything below for convenience.
 - **`MCP.Server.Common`** — Transport-agnostic core: types, state management,
   request routing, `ProcessHandlers`, `ToolHandler` framework.
-- **`MCP.Server.HTTP`** — Servant-based HTTP transport with JWT authentication
-  and streaming SSE responses at the `/mcp` endpoint.
+- **`MCP.Server.HTTP`** — Servant-based HTTP transports with streaming SSE
+  responses at the `/mcp` endpoint.  Provides both a JWT-authenticated API
+  (`MCPAPI` / `mcpAPI`) and a simple unauthenticated API
+  (`SimpleHTTPAPI` / `simpleHttpApp`) for local development or use behind a
+  reverse proxy.
 - **`MCP.Server.Stdio`** — Stdio transport reading/writing JSON-RPC messages
   line-by-line, suitable for subprocess-based integrations.
 
@@ -76,8 +79,9 @@ A fully documented example server lives in
 
 ## Features
 
-- **Two transports**: HTTP (Servant + SSE) and stdio
-- **JWT authentication** via `servant-auth-server` (HTTP transport)
+- **Three transports**: HTTP with JWT auth, simple unauthenticated HTTP, and stdio
+- **JWT authentication** via `servant-auth-server` (authenticated HTTP transport)
+- **Simple HTTP** for local development or behind a reverse proxy (`simpleHttpApp`)
 - **Extensible handler framework**: `ProcessHandlers` record with optional
   handlers for each MCP method
 - **Tool helpers**: `ToolHandler`, `toolHandler`, `withToolHandlers`,

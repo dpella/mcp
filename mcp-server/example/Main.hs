@@ -16,11 +16,14 @@
 = Quick start
 
 @
-cabal run mcp-example
+cabal run mcp-example                  -- HTTP with JWT auth
+cabal run mcp-example -- --simple-http -- HTTP without auth (local only)
+cabal run mcp-example -- --stdio       -- stdio transport
 @
 
-The server starts on @http:\/\/localhost:8080\/mcp@ and prints a JWT bearer token
-to stdout. Use this token in the @Authorization@ header for all requests.
+In HTTP mode (default) the server starts on @http:\/\/localhost:8080\/mcp@ and
+prints a JWT bearer token to stdout.  In simple-http mode no authentication
+is performed — use this only locally or behind an authenticating proxy.
 
 = Features demonstrated
 
@@ -52,7 +55,8 @@ This single-file example covers every major capability of the library:
    override the capabilities you need.  Use 'withToolHandlers' for a convenient
    tool-registration API.
 4. Create an 'MCPServerState' via 'initMCPServerState', wrap it in an 'MVar',
-   and serve it with @serveWithContext (Proxy \@MCPAPI) ctx (mcpAPI stateVar)@.
+   and serve it with @serveWithContext (Proxy \@MCPAPI) ctx (mcpAPI stateVar)@
+   for JWT auth, or @simpleHttpApp stateVar@ for unauthenticated local use.
 -}
 module Main where
 
@@ -452,22 +456,28 @@ handleFinalize st = return st{currentUser = Nothing}
 
 -- | Entry point.
 --
--- Supports two modes:
+-- Supports three modes:
 --
 -- * __HTTP mode__ (default): starts a Warp server with JWT authentication.
+-- * __Simple HTTP mode__ (@--simple-http@): starts a Warp server without
+--   authentication.  Only use locally or behind an authenticating proxy.
 -- * __Stdio mode__ (@--stdio@): reads JSON-RPC from stdin, writes to stdout.
 --   No authentication is needed.  Debug output goes to stderr.
 --
 -- @
--- cabal run mcp-example            # HTTP on port 8080
--- cabal run mcp-example -- --stdio # stdio transport
+-- cabal run mcp-example                  # HTTP with JWT on port 8080
+-- cabal run mcp-example -- --simple-http # HTTP without auth on port 8080
+-- cabal run mcp-example -- --stdio       # stdio transport
 -- @
 main :: IO ()
 main = do
     args <- getArgs
     if "--stdio" `elem` args
         then mainStdio
-        else mainHTTP
+        else
+            if "--simple-http" `elem` args
+                then mainSimpleHTTP
+                else mainHTTP
 
 -- | Run in stdio transport mode.
 --
@@ -492,6 +502,47 @@ mainStdio = do
             ){mcp_log_level = Just Debug}
 
     serveStdio stdin stdout initial_state
+
+-- | Run in simple HTTP mode without authentication.
+--
+-- No JWT or servant-auth.  This transport should only be used locally or
+-- behind a reverse proxy that handles authentication.
+--
+-- @
+-- cabal run mcp-example -- --simple-http
+-- @
+mainSimpleHTTP :: IO ()
+mainSimpleHTTP = do
+    hSetBuffering stdout LineBuffering
+
+    port <- maybe 8080 read <$> lookupEnv "PORT"
+
+    let impl = Implementation "mcp-example" "0.1.0" (Just "Example MCP Server (SimpleHTTP)")
+    let server_instructions = Just "This is an example MCP server using the SimpleHTTP transport. It provides echo, add, and current-time tools, sample resources, a summarize prompt, and completions."
+
+    let initial_state =
+            (initMCPServerState
+                (ExampleState Nothing) -- initial handler state
+                Nothing -- no handler init (no user type in SimpleHTTP)
+                (Just handleFinalize) -- lifecycle: after each request
+                exampleCapabilities -- what we support
+                impl -- server name + version
+                server_instructions -- instructions for clients
+                exampleHandlers -- all our handlers
+            ){mcp_log_level = Just Debug}
+    state_var <- newMVar initial_state
+
+    putStrLn "=== Example MCP Server (SimpleHTTP) ==="
+    putStrLn $ "Listening on http://localhost:" <> show port <> "/mcp"
+    putStrLn "WARNING: No authentication — only use locally or behind an authenticating proxy."
+    putStrLn ""
+    putStrLn "Example curl:"
+    putStrLn $ "  curl -X POST http://localhost:" <> show port <> "/mcp \\"
+    putStrLn "    -H 'Content-Type: application/json' \\"
+    putStrLn "    -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"curl\",\"version\":\"1.0\"}}}'"
+
+    let app = simpleHttpApp state_var
+    Warp.run port app
 
 -- | Run in HTTP mode with JWT authentication.
 mainHTTP :: IO ()
