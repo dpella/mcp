@@ -42,15 +42,16 @@ upload_package() {
   echo "=== Releasing $name ==="
 
   # Build docs and sdist for this package
-  rm -rf dist-newstyle/"$name"-*-docs.tar.gz
-  rm -rf dist-newstyle/sdist/"$name"-*.tar.gz
+  # Use [0-9] anchor so that e.g. "mcp-" doesn't also match "mcp-types-"
+  rm -rf dist-newstyle/"$name"-[0-9]*-docs.tar.gz
+  rm -rf dist-newstyle/sdist/"$name"-[0-9]*.tar.gz
   cabal haddock --haddock-for-hackage "$name"
   cabal sdist "$name"
 
   # Upload source tarball
-  cabal upload $publish_flag -u "$username" -p "$password" dist-newstyle/sdist/"$name"-*.tar.gz
+  cabal upload $publish_flag -u "$username" -p "$password" dist-newstyle/sdist/"$name"-[0-9]*.tar.gz
   # Upload docs
-  cabal upload $publish_flag -d -u "$username" -p "$password" dist-newstyle/"$name"-*-docs.tar.gz
+  cabal upload $publish_flag -d -u "$username" -p "$password" dist-newstyle/"$name"-[0-9]*-docs.tar.gz
 
   echo "=== Done: $name ==="
 }
