@@ -76,7 +76,7 @@ RUN curl -fsSL https://get-ghcup.haskell.org -o /tmp/get-ghcup.sh && \
 # We copy only the cabal files, since these won't change usually. This lets us avoid
 # rebuilding the dependencies all the time.
 COPY --parents --chown=${UID}:${GID} */*.cabal */*/*.cabal /app/
-COPY --chown=${UID}:${GID} cabal.project /app/cabal.project
+COPY --chown=${UID}:${GID} cabal.project cabal.project.freeze /app/
 
 WORKDIR /app
 # Using the cabal files, we can build the dependencies
