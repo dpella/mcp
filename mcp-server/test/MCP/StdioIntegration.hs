@@ -67,6 +67,7 @@ createStdioServerState =
     MCPServerState
         { mcp_server_initialized = False
         , mcp_handler_state = initializeTestState
+        , mcp_current_user = Nothing
         , mcp_handler_init = Nothing -- No user in stdio mode
         , mcp_handler_finalize = mb_handler_finalize
         , mcp_client_capabilities = Nothing
@@ -192,7 +193,7 @@ toolSpec = describe "Tools" $ do
             sendMsg h_write (toJSON $ createListToolsRequest 2)
             (_, ListToolsResult{tools = ts}) <- recvTypedResponse h_read
             let tool_names = fmap (\Tool{name = n} -> n) ts
-            tool_names `shouldMatchList` ["addition-tool", "constant-msg-tool"]
+            tool_names `shouldMatchList` ["addition-tool", "constant-msg-tool", "current-user-tool"]
 
     it "calls the addition tool" $ do
         withStdioServer $ \(h_read, h_write) -> do

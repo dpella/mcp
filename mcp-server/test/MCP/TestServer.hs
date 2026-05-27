@@ -184,6 +184,16 @@ processHandlers =
                 let ctx_result =
                         TextBlock $ TextContent "text" ("This is a constant message: " <> t_result) Nothing Nothing
                 return $ ProcessSuccess (CallToolResult [ctx_result] (Just result_value) Nothing Nothing)
+            "current-user-tool" -> do
+                mb_user <- getCurrentUser
+                case mb_user of
+                    Just user -> do
+                        let t_result = userId user
+                        let result_value = Map.fromList [("result", toJSON t_result)]
+                        let ctx_result =
+                                TextBlock $ TextContent "text" ("The current user is: " <> t_result) Nothing Nothing
+                        return $ ProcessSuccess (CallToolResult [ctx_result] (Just result_value) Nothing Nothing)
+                    Nothing -> return $ ProcessRPCError 401 "No authenticated user"
             _ -> return $ ProcessRPCError 404 "Tool not found"
 
     -- Example list prompts handler
@@ -331,6 +341,26 @@ availableTools =
         , annotations = Nothing
         , _meta = Nothing
         }
+    , Tool
+        { name = "current-user-tool"
+        , title = Just "Current User Tool"
+        , description = Just "Returns the authenticated request user"
+        , inputSchema =
+            InputSchema
+                { schemaType = "object"
+                , properties = Nothing
+                , required = Nothing
+                }
+        , outputSchema =
+            Just $
+                InputSchema
+                    { schemaType = "object"
+                    , properties = Just (Map.fromList [("result", object ["type" .= ("string" :: Text)])])
+                    , required = Just ["result"]
+                    }
+        , annotations = Nothing
+        , _meta = Nothing
+        }
     ]
 
 -- ** Available Prompts
@@ -455,6 +485,7 @@ createTestServerState = do
         MCPServerState
             { mcp_server_initialized = False
             , mcp_handler_state = initializeTestState
+            , mcp_current_user = Nothing
             , mcp_handler_init = mb_handler_init
             , mcp_handler_finalize = mb_handler_finalize
             , mcp_client_capabilities = Nothing

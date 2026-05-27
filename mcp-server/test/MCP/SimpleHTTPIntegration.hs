@@ -78,6 +78,7 @@ createSimpleHTTPTestState = do
         MCPServerState
             { mcp_server_initialized = False
             , mcp_handler_state = initializeTestState
+            , mcp_current_user = Nothing
             , mcp_handler_init = Nothing -- no user type in SimpleHTTP
             , mcp_handler_finalize = mb_handler_finalize
             , mcp_client_capabilities = Nothing
