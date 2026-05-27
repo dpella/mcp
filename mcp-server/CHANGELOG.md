@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2.0
+
+### Fixed
+- Use the authenticated user from each HTTP request when processing JWT-authenticated
+  MCP requests.
+
 ## 0.3.1.0
 
 ### Added
