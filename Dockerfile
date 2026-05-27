@@ -35,6 +35,7 @@ RUN --mount=type=cache,id=apt-cache-mcp,target=/var/cache/apt \
       curl \
       ca-certificates \
       locales \
+      pkg-config \
       build-essential \
       libffi-dev \
       libgmp-dev \
