@@ -38,6 +38,9 @@ module MCP.Server.Common (
     MCPServerState (..),
     initMCPServerState,
 
+    -- * Per-request authentication
+    getCurrentUser,
+
     -- * Type families
     MCPHandlerState,
     MCPHandlerUser,
@@ -300,7 +303,23 @@ initMCPServerState ::
     ProcessHandlers ->
     MCPServerState
 initMCPServerState init_state handler_init handler_finalize =
-    MCPServerState False init_state handler_init handler_finalize Nothing (Just Warning) IM.empty 0
+    MCPServerState False init_state Nothing handler_init handler_finalize Nothing (Just Warning) IM.empty 0
+
+{- | Read the authenticated user associated with the request currently being
+processed.
+
+This reflects the @servant-auth@ result attached to the in-flight HTTP request
+(JWT transport) and is set per request before each handler runs.  It is the
+recommended way to derive identity inside a handler — unlike the one-shot
+'mcp_handler_init' hook, which only fires on the first @initialize@ call to
+the server-process-wide singleton state and is unsafe for multi-tenant
+deployments.
+
+Returns 'Nothing' under transports that do not perform per-request auth
+(stdio, @simpleHttpApp@).
+-}
+getCurrentUser :: MCPServerT (Maybe MCPHandlerUser)
+getCurrentUser = gets mcp_current_user
 
 {- | Type family used to configure the handler state threaded through 'MCPServerT'.
 Users must provide a type instance before using the MCP server, e.g.
@@ -324,6 +343,11 @@ data MCPServerState = MCPServerState
     -- ^ Whether initialize has been called
     , mcp_handler_state :: MCPHandlerState
     -- ^ Current handler state for this session
+    , mcp_current_user :: Maybe MCPHandlerUser
+    -- ^ Authenticated user for the request currently being processed.  Set
+    -- per request by the HTTP JWT transport before each handler runs; always
+    -- 'Nothing' under stdio and 'simpleHttpApp'.  Prefer reading this via
+    -- 'getCurrentUser' rather than touching the field directly.
     , mcp_handler_init :: Maybe (MCPHandlerUser -> MCPHandlerState -> IO MCPHandlerState)
     -- ^ Initialize the handler state on server initialization
     , mcp_handler_finalize :: Maybe (MCPHandlerState -> IO MCPHandlerState)

@@ -34,7 +34,6 @@ import Data.ByteString.Lazy.Char8 qualified as BSL
 import Data.IntMap qualified as IM
 import Data.Text qualified as T
 import Data.Text.Encoding (encodeUtf8)
-import Data.Tuple (swap)
 import MCP.Server.Common
 import Network.HTTP.Media ((//))
 import Servant
@@ -148,8 +147,16 @@ handleMCPRequestCore state_var mb_user request_value =
                                                 return cur_st{mcp_handler_state = h_st'}
                     Nothing -> return ()
 
-                -- Process the request routing to the appropriate handler
-                res <- liftIO $ modifyMVar state_var $ fmap swap <$> runStateT (processMethod server_initialized method params)
+                -- Process the request routing to the appropriate handler.
+                -- Set 'mcp_current_user' to the request's authenticated user
+                -- (if any) inside the same atomic block that runs the
+                -- handler, so concurrent requests cannot observe each
+                -- other's identities through the shared MVar.  Handlers
+                -- read this via 'getCurrentUser'.
+                res <- liftIO $ modifyMVar state_var $ \cur_st -> do
+                    let cur_st_with_user = cur_st{mcp_current_user = mb_user}
+                    (r, final_st) <- runStateT (processMethod server_initialized method params) cur_st_with_user
+                    pure (final_st, r)
 
                 -- Log the response if debug level
                 cur_log_level <- liftIO $ mcp_log_level <$> readMVar state_var
