@@ -310,7 +310,7 @@ processed.
 
 This reflects the @servant-auth@ result attached to the in-flight HTTP request
 (JWT transport) and is set per request before each handler runs.  It is the
-recommended way to derive identity inside a handler — unlike the one-shot
+recommended way to derive identity inside a handler, unlike the one-shot
 'mcp_handler_init' hook, which only fires on the first @initialize@ call to
 the server-process-wide singleton state and is unsafe for multi-tenant
 deployments.
@@ -345,9 +345,10 @@ data MCPServerState = MCPServerState
     -- ^ Current handler state for this session
     , mcp_current_user :: Maybe MCPHandlerUser
     -- ^ Authenticated user for the request currently being processed.  Set
-    -- per request by the HTTP JWT transport before each handler runs; always
-    -- 'Nothing' under stdio and 'simpleHttpApp'.  Prefer reading this via
-    -- 'getCurrentUser' rather than touching the field directly.
+    -- per request by the HTTP JWT transport before each handler runs and
+    -- cleared afterward; always 'Nothing' under stdio and 'simpleHttpApp'.
+    -- Prefer reading this via 'getCurrentUser' rather than touching the
+    -- field directly.
     , mcp_handler_init :: Maybe (MCPHandlerUser -> MCPHandlerState -> IO MCPHandlerState)
     -- ^ Initialize the handler state on server initialization
     , mcp_handler_finalize :: Maybe (MCPHandlerState -> IO MCPHandlerState)

@@ -148,15 +148,11 @@ handleMCPRequestCore state_var mb_user request_value =
                     Nothing -> return ()
 
                 -- Process the request routing to the appropriate handler.
-                -- Set 'mcp_current_user' to the request's authenticated user
-                -- (if any) inside the same atomic block that runs the
-                -- handler, so concurrent requests cannot observe each
-                -- other's identities through the shared MVar.  Handlers
-                -- read this via 'getCurrentUser'.
-                res <- liftIO $ modifyMVar state_var $ \cur_st -> do
-                    let cur_st_with_user = cur_st{mcp_current_user = mb_user}
-                    (r, final_st) <- runStateT (processMethod server_initialized method params) cur_st_with_user
-                    pure (final_st, r)
+                -- Set mcp_current_user while the handler runs, then clear it
+                -- before releasing the shared state. Handlers read this via
+                -- getCurrentUser.
+                res <- liftIO $ modifyMVar state_var $
+                    runWithCurrentUser (processMethod server_initialized method params)
 
                 -- Log the response if debug level
                 cur_log_level <- liftIO $ mcp_log_level <$> readMVar state_var
@@ -221,13 +217,12 @@ handleMCPRequestCore state_var mb_user request_value =
                     Yield msg $
                         Effect $ do
                             ci_resp <- liftIO $ takeMVar mvar
-                            cur_st <- liftIO $ readMVar state_var
-                            (result, cur_st') <-
+                            result <-
                                 liftIO $
-                                    flip runStateT cur_st $
-                                        runExceptT $
-                                            ci_cont ci_resp
-                            liftIO $ modifyMVar_ state_var $ \_ -> return cur_st'
+                                    modifyMVar state_var $
+                                        runWithCurrentUser $
+                                            runExceptT $
+                                                ci_cont ci_resp
                             case result of
                                 Left err -> do
                                     return $ Source.Error $ T.unpack err
@@ -238,3 +233,9 @@ handleMCPRequestCore state_var mb_user request_value =
                     flip Yield Stop $
                         ResponseMessage $
                             JSONRPCResponse rPC_VERSION req_id (recurReplaceMeta $ toJSON response)
+
+    runWithCurrentUser :: StateT MCPServerState IO a -> MCPServerState -> IO (MCPServerState, a)
+    runWithCurrentUser action cur_st = do
+        let cur_st_with_user = cur_st{mcp_current_user = mb_user}
+        (result, final_st) <- runStateT action cur_st_with_user
+        pure (final_st{mcp_current_user = Nothing}, result)

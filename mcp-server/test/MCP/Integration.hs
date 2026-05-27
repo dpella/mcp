@@ -151,7 +151,7 @@ endpointsSpec = describe "Endpoint Health Check" $ do
     it "handles list/tools request successfully" $ do
         withInitializedServer $ \headers -> do
             let req_id = 2
-            let expected_tools = ["addition-tool", "constant-msg-tool"]
+            let expected_tools = ["addition-tool", "constant-msg-tool", "current-user-tool"]
             let list_tool_req = toJSON $ createListToolsRequest req_id
             -- the client sends the list tools request
             resp_list_tool <- mcpPostRequest headers list_tool_req
@@ -178,6 +178,17 @@ endpointsSpec = describe "Endpoint Health Check" $ do
             resp_call2 <- mcpPostRequest headers call_req2
             withValidJSONRPCResponse resp_call2 req_id2 $
                 validateToolCallResponse (toJSON ("Hello, World!" :: Text))
+
+    it "uses the authenticated user from each request" $ do
+        withInitializedServer $ \_headers -> do
+            withAuthenticatedRequestForSession "second-user-id" $ \headers -> do
+                let req_id = 11
+                let call_req =
+                        toJSON $
+                            createCallToolRequest req_id "current-user-tool" []
+                resp_call <- mcpPostRequest headers call_req
+                withValidJSONRPCResponse resp_call req_id $
+                    validateToolCallResponse (toJSON ("second-user-id" :: Text))
 
     it "handles prompt/list requests successfully" $ do
         withInitializedServer $ \headers -> do
