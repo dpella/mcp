@@ -44,6 +44,7 @@ module MCP.Server.Common (
     -- * Type families
     MCPHandlerState,
     MCPHandlerUser,
+    MCPAuth,
 
     -- * Core processing (transport-agnostic)
     processMethod,
@@ -56,6 +57,7 @@ module MCP.Server.Common (
 ) where
 
 import Control.Concurrent.MVar (MVar)
+import Data.Kind (Type)
 import Control.Monad.Except
 import Control.Monad.State.Lazy
 import Data.Aeson (Value, fromJSON, object, toJSON)
@@ -327,11 +329,17 @@ Users must provide a type instance before using the MCP server, e.g.
 -}
 type family MCPHandlerState
 
-{- | Type family used to configure the user type for JWT authentication.
+{- | Type family used to configure the user type for authentication.
 Users must provide a type instance before using the MCP server, e.g.
 @type instance MCPHandlerUser = MyUser@.
 -}
 type family MCPHandlerUser
+
+{- | Type family for the list of auth schemes used by the MCP HTTP transport.
+Users must provide a type instance before using the MCP server, e.g.
+@type instance MCPAuth = '[JWT]@.
+-}
+type family MCPAuth :: [Type]
 
 {- | MCP server state maintained across requests.
 
