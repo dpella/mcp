@@ -11,7 +11,8 @@ Servant-based HTTP transports for the MCP server.
 
 This module provides two HTTP transports:
 
-* 'MCPAPI' / 'mcpAPI' — a JWT-authenticated transport using @servant-auth@.
+* 'MCPAPI' / 'mcpAPI' — an authenticated transport using @servant-auth@.
+  The auth scheme is configurable via the 'MCPAuth' type family.
   Use this when your server is exposed to the network and you need
   per-request identity.
 
@@ -43,7 +44,7 @@ import Data.Text (Text)
 import MCP.Server.Common
 import MCP.Server.HTTP.Internal
 import Servant
-import Servant.Auth.Server (Auth, AuthResult (..), JWT)
+import Servant.Auth.Server (Auth, AuthResult (..))
 import Servant.Auth.Server qualified as AuthServer
 import Servant.Types.SourceT
 
@@ -51,21 +52,22 @@ import Servant.Types.SourceT
 -- JWT-authenticated API
 -- ---------------------------------------------------------------------------
 
-{- | Servant API type for the JWT-authenticated MCP endpoint.
+{- | Servant API type for the authenticated MCP endpoint.
 
-Accepts JSON-RPC requests with JWT authentication via servant-auth.
+Accepts JSON-RPC requests with authentication via servant-auth.
+The auth scheme is determined by the 'MCPAuth' type family.
 All MCP methods are multiplexed through this single endpoint.
 -}
 type MCPAPI =
     "mcp"
-        :> Auth '[JWT] MCPHandlerUser
+        :> Auth MCPAuth MCPHandlerUser
         -- \^ JWT authentication using servant-auth
         :> ReqBody '[JSON] JSONRPCMessage
         -- \^ JSON-RPC request
         :> StreamPost JSONRPCFrame JSONRPCEvent (SourceIO JSONRPCMessage)
         -- \^ Stream of JSON-RPC responses
         :<|> "mcp"
-            :> Auth '[JWT] MCPHandlerUser
+            :> Auth MCPAuth MCPHandlerUser
             :> StreamGet JSONRPCFrame JSONRPCEvent (SourceIO JSONRPCMessage)
 
 -- | Type of the MCP API
