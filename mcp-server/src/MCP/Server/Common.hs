@@ -38,6 +38,9 @@ module MCP.Server.Common (
     MCPServerState (..),
     initMCPServerState,
 
+    -- * Request state
+    MCPRequestState (..),
+
     -- * Per-request authentication
     getCurrentUser,
 
@@ -55,9 +58,9 @@ module MCP.Server.Common (
     module MCP.Types,
 ) where
 
-import Control.Concurrent.MVar (MVar)
+import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, readMVar)
 import Control.Monad.Except
-import Control.Monad.State.Lazy
+import Control.Monad.Reader
 import Data.Aeson (Value, fromJSON, object, toJSON)
 import Data.Aeson qualified as Aeson
 import Data.Aeson.KeyMap qualified as KM
@@ -120,7 +123,7 @@ instance Functor ProcessResult where
 Provides access to the MCP server state and IO operations,
 with the state available to the handlers.
 -}
-type MCPServerT a = ExceptT Text (StateT MCPServerState IO) a
+type MCPServerT a = ExceptT Text (ReaderT MCPRequestState IO) a
 
 {- | Handlers for MCP protocol methods.
 
@@ -303,7 +306,7 @@ initMCPServerState ::
     ProcessHandlers ->
     MCPServerState
 initMCPServerState init_state handler_init handler_finalize =
-    MCPServerState False init_state Nothing handler_init handler_finalize Nothing (Just Warning) IM.empty 0
+    MCPServerState False init_state handler_init handler_finalize Nothing (Just Warning) IM.empty 0
 
 {- | Read the authenticated user associated with the request currently being
 processed.
@@ -319,7 +322,7 @@ Returns 'Nothing' under transports that do not perform per-request auth
 (stdio, @simpleHttpApp@).
 -}
 getCurrentUser :: MCPServerT (Maybe MCPHandlerUser)
-getCurrentUser = gets mcp_current_user
+getCurrentUser = asks mcp_current_user
 
 {- | Type family used to configure the handler state threaded through 'MCPServerT'.
 Users must provide a type instance before using the MCP server, e.g.
@@ -333,6 +336,17 @@ Users must provide a type instance before using the MCP server, e.g.
 -}
 type family MCPHandlerUser
 
+
+data MCPRequestState = MCPRequestState
+    { mcp_current_user :: Maybe MCPHandlerUser
+    -- ^ Authenticated user for the request currently being processed.  Set
+    -- per request by the HTTP JWT transport before each handler runs and
+    -- cleared afterward; always 'Nothing' under stdio and 'simpleHttpApp'.
+    -- Prefer reading this via 'getCurrentUser' rather than touching the
+    -- field directly.
+    , mcp_server_state :: MVar MCPServerState 
+    }
+
 {- | MCP server state maintained across requests.
 
 Contains all information needed to process MCP requests including
@@ -343,12 +357,6 @@ data MCPServerState = MCPServerState
     -- ^ Whether initialize has been called
     , mcp_handler_state :: MCPHandlerState
     -- ^ Current handler state for this session
-    , mcp_current_user :: Maybe MCPHandlerUser
-    -- ^ Authenticated user for the request currently being processed.  Set
-    -- per request by the HTTP JWT transport before each handler runs and
-    -- cleared afterward; always 'Nothing' under stdio and 'simpleHttpApp'.
-    -- Prefer reading this via 'getCurrentUser' rather than touching the
-    -- field directly.
     , mcp_handler_init :: Maybe (MCPHandlerUser -> MCPHandlerState -> IO MCPHandlerState)
     -- ^ Initialize the handler state on server initialization
     , mcp_handler_finalize :: Maybe (MCPHandlerState -> IO MCPHandlerState)
@@ -420,7 +428,7 @@ the HTTP and stdio transports.  It enforces initialization order
 has been initialized) and parses method parameters before delegating
 to the 'ProcessHandlers'.
 -}
-processMethod :: Bool -> Text -> Aeson.Value -> StateT MCPServerState IO (ProcessResult Aeson.Value)
+processMethod :: Bool -> Text -> Aeson.Value -> ReaderT MCPRequestState IO (ProcessResult Aeson.Value)
 processMethod False mthd _ | not $ mthd `Set.member` allowedWithoutInitialization = server_not_initialized
 processMethod _ mthd Aeson.Null | mthd `Set.member` allowedWithoutParams = processMethod True mthd (object [])
 processMethod _ "resources/list" mb_arg = runProcessHandler listResourcesHandler mb_arg
@@ -438,40 +446,42 @@ processMethod _ "logging/setLevel" p
     | Aeson.Error e <- fromJSON @SetLevelParams p = invalid_params e
 processMethod _ "logging/setLevel" p
     | Aeson.Success (SetLevelParams{level = level}) <- fromJSON @SetLevelParams p = do
-        modify $ \s -> s{mcp_log_level = Just level}
+        stateMVar <- asks mcp_server_state
+        liftIO $ modifyMVar_ stateMVar  $ \s -> pure $ s{mcp_log_level = Just level}
         return $ ProcessSuccess Aeson.Null
 processMethod _ "initialize" p
     | Aeson.Error e <- fromJSON @InitializeParams p = invalid_params e
 processMethod _ "initialize" p
     | Aeson.Success (InitializeParams{capabilities = capabilities}) <- fromJSON @InitializeParams p = do
-        MCPServerState{..} <- get
-        modify $ \s ->
-            s
+        stateMVar <- asks mcp_server_state
+        liftIO $ modifyMVar_ stateMVar $ \s ->
+            pure $ s
                 { mcp_server_initialized = True
                 , mcp_client_capabilities = Just capabilities
                 }
+        state <- liftIO $ readMVar stateMVar
         let result =
                 InitializeResult
                     { protocolVersion = pROTOCOL_VERSION
-                    , capabilities = mcp_server_capabilities
-                    , serverInfo = mcp_implementation
-                    , instructions = mcp_instructions
+                    , capabilities = mcp_server_capabilities state
+                    , serverInfo = mcp_implementation state
+                    , instructions = mcp_instructions state
                     , _meta = Nothing
                     }
         return $ ProcessSuccess $ toJSON result
 processMethod _ _ _ = method_not_found
 
 -- | Standard JSON-RPC error responses
-missing_params :: StateT MCPServerState IO (ProcessResult Aeson.Value)
+missing_params :: ReaderT MCPRequestState IO (ProcessResult Aeson.Value)
 missing_params = return $ ProcessRPCError iNVALID_PARAMS "Missing params"
 
-invalid_params :: String -> StateT MCPServerState IO (ProcessResult Aeson.Value)
+invalid_params :: String -> ReaderT MCPRequestState IO (ProcessResult Aeson.Value)
 invalid_params = return . ProcessRPCError iNVALID_PARAMS . ("Invalid params: " <>) . T.pack
 
-server_not_initialized :: StateT MCPServerState IO (ProcessResult Aeson.Value)
+server_not_initialized :: ReaderT MCPRequestState IO (ProcessResult Aeson.Value)
 server_not_initialized = return $ ProcessRPCError sERVER_NOT_INITIALIZED "Server not initialized"
 
-method_not_found :: StateT MCPServerState IO (ProcessResult Aeson.Value)
+method_not_found :: ReaderT MCPRequestState IO (ProcessResult Aeson.Value)
 method_not_found = return $ ProcessRPCError mETHOD_NOT_FOUND "Method not found"
 
 -- | Helper to run a process handler with argument parsing
@@ -480,14 +490,15 @@ runProcessHandler ::
     (Aeson.FromJSON a, Aeson.ToJSON b) =>
     (ProcessHandlers -> Maybe (a -> MCPServerT (ProcessResult b))) ->
     Aeson.Value ->
-    StateT MCPServerState IO (ProcessResult Aeson.Value)
+    ReaderT MCPRequestState IO (ProcessResult Aeson.Value)
 runProcessHandler _ Aeson.Null = missing_params
 runProcessHandler handler arg_value =
     case fromJSON @a arg_value of
         Aeson.Error err -> invalid_params err
         Aeson.Success arg -> do
-            handlerImpl <- gets (handler . mcp_process_handlers)
-            case handlerImpl of
+            stateMVar <- asks mcp_server_state
+            state <- liftIO $ readMVar stateMVar
+            case handler (mcp_process_handlers state) of
                 Just impl -> do
                     impl_res <- runExceptT $ impl arg
                     case impl_res of

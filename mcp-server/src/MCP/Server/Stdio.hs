@@ -19,13 +19,14 @@ module MCP.Server.Stdio (
     serveStdio,
 ) where
 
+import Control.Concurrent.MVar
+import Control.Monad (void)
 import Control.Monad.Except
-import Control.Monad.State.Lazy
+import Control.Monad.Reader
 import Data.Aeson (encode)
 import Data.Aeson qualified as Aeson
 import Data.ByteString.Char8 qualified as BS
 import Data.ByteString.Lazy.Char8 qualified as BSL
-import Data.IORef
 import Data.Text qualified as T
 import MCP.Server.Common
 import System.IO (BufferMode (..), Handle, hFlush, hIsEOF, hSetBuffering)
@@ -57,11 +58,11 @@ serveStdio ::
 serveStdio h_in h_out initial_state = do
     hSetBuffering h_in LineBuffering
     hSetBuffering h_out LineBuffering
-    state_ref <- newIORef initial_state
-    loop state_ref
+    state_var <- newMVar initial_state
+    loop state_var
   where
-    loop :: IORef MCPServerState -> IO ()
-    loop state_ref = do
+    loop :: MVar MCPServerState -> IO ()
+    loop state_var = do
         eof <- hIsEOF h_in
         if eof
             then return ()
@@ -74,13 +75,13 @@ serveStdio h_in h_out initial_state = do
                             ErrorMessage $
                                 JSONRPCError rPC_VERSION (RequestId Aeson.Null) $
                                     JSONRPCErrorInfo pARSE_ERROR (T.pack err) Nothing
-                        loop state_ref
+                        loop state_var
                     Right msg -> do
-                        processStdioMessage state_ref msg
-                        loop state_ref
+                        processStdioMessage state_var msg
+                        loop state_var
 
-    processStdioMessage :: IORef MCPServerState -> JSONRPCMessage -> IO ()
-    processStdioMessage state_ref = \case
+    processStdioMessage :: MVar MCPServerState -> JSONRPCMessage -> IO ()
+    processStdioMessage state_var = \case
         NotificationMessage _ ->
             -- Notifications don't produce a response
             return ()
@@ -107,15 +108,14 @@ serveStdio h_in h_out initial_state = do
                                     JSONRPCError rPC_VERSION req_id $
                                         JSONRPCErrorInfo iNVALID_REQUEST "Invalid request ID" Nothing
                         else do
-                            cur_st <- readIORef state_ref
+                            cur_st <- readMVar state_var
                             let initialized = mcp_server_initialized cur_st
 
                             -- Process the request
-                            (res, new_st) <- runStateT (processMethod initialized method params) cur_st
-                            writeIORef state_ref new_st
+                            res <- runReaderT (processMethod initialized method params) (MCPRequestState Nothing state_var)
 
                             -- Handle ProcessClientInput by synchronous read/write
-                            final_res <- resolveClientInput state_ref res
+                            final_res <- resolveClientInput state_var res
 
                             -- Convert result to response message
                             case final_res of
@@ -141,22 +141,22 @@ serveStdio h_in h_out initial_state = do
                                                 JSONRPCErrorInfo iNTERNAL_ERROR "Unresolved client input" Nothing
 
                             -- Finalize handler state
-                            st <- readIORef state_ref
+                            st <- readMVar state_var
                             case mcp_handler_finalize st of
                                 Nothing -> return ()
                                 Just finalizer -> do
                                     h_st' <- finalizer (mcp_handler_state st)
-                                    writeIORef state_ref st{mcp_handler_state = h_st'}
+                                    void $ swapMVar state_var st{mcp_handler_state = h_st'}
 
     -- \| Resolve ProcessClientInput by writing a request to the client and
     -- reading the response synchronously from stdin.
-    resolveClientInput :: IORef MCPServerState -> ProcessResult Aeson.Value -> IO (ProcessResult Aeson.Value)
-    resolveClientInput state_ref = \case
+    resolveClientInput :: MVar MCPServerState -> ProcessResult Aeson.Value -> IO (ProcessResult Aeson.Value)
+    resolveClientInput state_var = \case
         ProcessClientInput ci_mthd ci_params ci_cont -> do
             -- Assign a request ID
-            st <- readIORef state_ref
+            st <- readMVar state_var
             let r_id = mcp_pending_responses_next st
-            writeIORef state_ref st{mcp_pending_responses_next = r_id + 1}
+            _ <- swapMVar state_var st{mcp_pending_responses_next = r_id + 1}
 
             -- Write the server-to-client request
             writeMsg $
@@ -168,12 +168,15 @@ serveStdio h_in h_out initial_state = do
             case Aeson.eitherDecodeStrict' @JSONRPCMessage resp_line of
                 Right (ResponseMessage (JSONRPCResponse _ _ result)) -> do
                     -- Run the continuation with the client's response
-                    cur_st <- readIORef state_ref
-                    (cont_result, new_st) <- runStateT (runExceptT $ ci_cont result) cur_st
-                    writeIORef state_ref new_st
+                    cur_st <- readMVar state_var
+                    stateMVar <- newMVar cur_st
+                    let requestState = MCPRequestState Nothing stateMVar
+                    cont_result <- runReaderT (runExceptT $ ci_cont result) requestState
+                    new_st <- readMVar stateMVar 
+                    _ <- swapMVar state_var new_st
                     case cont_result of
                         Left err -> return $ ProcessServerError err
-                        Right next_res -> resolveClientInput state_ref next_res
+                        Right next_res -> resolveClientInput state_var next_res
                 Right (ErrorMessage (JSONRPCError _ _ (JSONRPCErrorInfo _ err_msg _))) ->
                     return $ ProcessServerError err_msg
                 _ ->
