@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- **Breaking**: A POST to `/mcp` that carries a notification or a response is
+  now answered with `202 Accepted` and no body, as the Streamable HTTP
+  transport requires. A request is still answered with its JSON-RPC messages as
+  Server-Sent Events. A response to a request the server never sent is answered
+  with `400 Bad Request`.
+- **Breaking**: The POST route of `MCPAPI` and `SimpleHTTPAPI` is a `MultiVerb`
+  over `MCPPostResponses`, and `handleMCPRequest` answers `MCPPostResult`.
+- Requires `servant` and `servant-server` 0.20.3 or later, and
+  `servant-auth-server` before 0.4.11.
+
 ## 0.3.0.1 — Package Split
 
 ### Changed

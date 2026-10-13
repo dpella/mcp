@@ -115,7 +115,16 @@ protocolFlowSpec = describe "Protocol Flow" $ do
         withValidSimpleHTTPResponse resp_init 1 validateInitializationResponse
 
         let notify_request = toJSON createInitializedNotification
-        mcpPostRequestOk headers notify_request
+        mcpPostNotificationAccepted headers notify_request
+
+    it "answers a notification with 202 Accepted and no body" $
+        mcpPostNotificationAccepted headers (toJSON createInitializedNotification)
+
+    it "answers a request with a stream of Server-Sent Events" $
+        mcpPostRequestStreams headers (toJSON createPingRequest)
+
+    it "rejects a response to a request the server never sent" $
+        mcpPostRequestExpects headers createUnexpectedResponse 400
 
     it "rejects request with wrong jsonrpc version" $ do
         let invalid_request =
@@ -205,7 +214,7 @@ withInitializedSimpleHTTP f = do
     let init_request = toJSON createInitializeRequest
     mcpPostRequestOk headers init_request
     let notify_request = toJSON createInitializedNotification
-    mcpPostRequestOk headers notify_request
+    mcpPostNotificationAccepted headers notify_request
     f
 
 -- | Parse and validate a SimpleHTTP JSON-RPC response

@@ -16,7 +16,7 @@ implementation.
 module MCP.TestUtils where
 
 import Crypto.JOSE.Error as Crypto
-import Data.Aeson (ToJSON, Value (..), encode, toJSON)
+import Data.Aeson (ToJSON, Value (..), encode, object, toJSON, (.=))
 import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as BSL
 import Data.Map qualified as Map
@@ -29,13 +29,14 @@ import Network.HTTP.Types qualified as HTTP
 import Network.Wai.Test (SResponse)
 import Servant.Auth.Server qualified as AuthServer
 import Test.Hspec.Wai (
-    ResponseMatcher,
+    ResponseMatcher (..),
     WaiExpectation,
     WaiSession,
     getState,
     liftIO,
     request,
     shouldRespondWith,
+    (<:>),
  )
 
 -- * Utility Functions for MCP testing
@@ -73,6 +74,28 @@ mcpPostRequestExpects headers request_object expected_response =
 mcpPostRequestOk :: [(HTTP.HeaderName, BS.ByteString)] -> Value -> WaiExpectation st
 mcpPostRequestOk headers request_object =
     mcpPostRequestExpects headers request_object 200
+
+{- | Helper function for posting a notification or a response, expecting 202
+Accepted with no body
+-}
+mcpPostNotificationAccepted :: [(HTTP.HeaderName, BS.ByteString)] -> Value -> WaiExpectation st
+mcpPostNotificationAccepted headers request_object =
+    mcpPostRequestExpects headers request_object ""{matchStatus = 202}
+
+{- | Helper function for posting a request, expecting 200 with its JSON-RPC
+messages as Server-Sent Events
+-}
+mcpPostRequestStreams :: [(HTTP.HeaderName, BS.ByteString)] -> Value -> WaiExpectation st
+mcpPostRequestStreams headers request_object =
+    mcpPostRequestExpects
+        headers
+        request_object
+        200{matchHeaders = ["Content-Type" <:> "text/event-stream"]}
+
+-- | A JSON-RPC response to a request the server never sent
+createUnexpectedResponse :: Value
+createUnexpectedResponse =
+    object ["jsonrpc" .= ("2.0" :: Text), "id" .= (99 :: Int), "result" .= object []]
 
 -- | Create an authenticated request with JWT token
 withAuthenticatedRequest ::
@@ -118,7 +141,7 @@ withInitializedServer action =
         let init_request = toJSON createInitializeRequest
         mcpPostRequestOk headers init_request
         let notify_request = toJSON createInitializedNotification
-        mcpPostRequestOk headers notify_request
+        mcpPostNotificationAccepted headers notify_request
         action headers
 
 -- ** Request builders

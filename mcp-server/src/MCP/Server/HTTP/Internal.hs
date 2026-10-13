@@ -20,6 +20,10 @@ module MCP.Server.HTTP.Internal (
     JSONRPCFrame,
     JSONRPCEvent,
 
+    -- * POST responses
+    MCPPostResponses,
+    MCPPostResult (..),
+
     -- * Core request handler
     handleMCPRequestCore,
 ) where
@@ -30,13 +34,16 @@ import Control.Monad.Except
 import Control.Monad.State.Lazy
 import Data.Aeson (encode, object, toJSON, (.=))
 import Data.Aeson qualified as Aeson
+import Data.ByteString qualified as BS
 import Data.ByteString.Lazy.Char8 qualified as BSL
+import Data.SOP (I (..), NS (..), unI, unZ)
 import Data.IntMap qualified as IM
 import Data.Text qualified as T
 import Data.Text.Encoding (encodeUtf8)
 import MCP.Server.Common
 import Network.HTTP.Media ((//))
 import Servant
+import Servant.API.MultiVerb (AsUnion (..), RespondEmpty, RespondStreaming)
 import Servant.Types.SourceT
 import Servant.Types.SourceT qualified as Source
 
@@ -57,9 +64,44 @@ instance Accept JSONRPCEvent where
     contentType _ = "text" // "event-stream"
 
 instance MimeRender JSONRPCEvent JSONRPCMessage where
-    mimeRender _ val =
-        ("event: message\n" <>) $
-            ("data:" <> encode (toJSON val) <> "\n")
+    mimeRender _ = eventFields
+
+-- | The fields of the Server-Sent Event that carries a JSON-RPC message.
+eventFields :: JSONRPCMessage -> BSL.ByteString
+eventFields val = "event: message\ndata:" <> encode (toJSON val) <> "\n"
+
+-- | A JSON-RPC message as one complete Server-Sent Event.
+sseEvent :: JSONRPCMessage -> BS.ByteString
+sseEvent val = BSL.toStrict (eventFields val <> "\n")
+
+-- ---------------------------------------------------------------------------
+-- POST responses
+-- ---------------------------------------------------------------------------
+
+{- | The responses a POST to the MCP endpoint can produce.
+
+The Streamable HTTP transport requires @202 Accepted@ with no body when the
+posted message is a notification or a response. A request gets its JSON-RPC
+messages as a stream of Server-Sent Events.
+-}
+type MCPPostResponses =
+    '[ RespondEmpty 202 "The notification or response was accepted"
+     , RespondStreaming 200 "The JSON-RPC messages of the request, as Server-Sent Events" JSONRPCFrame JSONRPCEvent
+     ]
+
+-- | What the server answers to a message posted to the MCP endpoint.
+data MCPPostResult
+    = -- | The message was a notification or a response. The server sends no body.
+      MCPAccepted
+    | -- | The message was a request. Each JSON-RPC message of the answer is one
+      -- complete Server-Sent Event.
+      MCPEventStream (SourceIO BS.ByteString)
+
+instance AsUnion MCPPostResponses MCPPostResult where
+    toUnion MCPAccepted = Z (I ())
+    toUnion (MCPEventStream events) = S (Z (I events))
+    fromUnion (Z (I ())) = MCPAccepted
+    fromUnion (S events) = MCPEventStream (unI (unZ events))
 
 -- ---------------------------------------------------------------------------
 -- Core request handler
@@ -80,9 +122,9 @@ handleMCPRequestCore ::
     -- | Authenticated user, if available (for @mcp_handler_init@)
     Maybe MCPHandlerUser ->
     JSONRPCMessage ->
-    Handler (SourceIO JSONRPCMessage)
+    Handler MCPPostResult
 handleMCPRequestCore state_var mb_user request_value =
-    fromStepT <$> do
+    do
         MCPServerState
             { mcp_server_initialized = server_initialized
             , mcp_log_level = log_level
@@ -99,27 +141,27 @@ handleMCPRequestCore state_var mb_user request_value =
                             "[request] " <> encode request_value
 
         case request_value of
+            -- A notification needs no answer.
             NotificationMessage _ ->
-                return $
-                    flip Yield Stop $
-                        NotificationMessage $
-                            JSONRPCNotification rPC_VERSION "ok" Aeson.Null
+                return MCPAccepted
             ErrorMessage err -> do
                 throwError err400{errBody = encode err}
             -- Fill in the MVar for any pending responses from the client
             ResponseMessage (JSONRPCResponse _ (RequestId req_id) result) -> do
                 cur_st <- liftIO $ readMVar state_var
                 case Aeson.fromJSON req_id of
-                    Aeson.Error err -> return (Source.Error $ "Invalid request ID: " <> err)
+                    Aeson.Error err ->
+                        throwError err400{errBody = "Invalid request ID: " <> BSL.pack err}
                     Aeson.Success req_index ->
                         case IM.lookup req_index (mcp_pending_responses cur_st) of
                             Nothing ->
-                                return $ Source.Error "Server received unexpected response"
-                            Just mvar -> liftIO $ do
-                                modifyMVar_ state_var $ \cur_st' ->
-                                    return cur_st'{mcp_pending_responses = IM.delete req_index (mcp_pending_responses cur_st')}
-                                putMVar mvar result
-                                return Stop
+                                throwError err400{errBody = "Server received unexpected response"}
+                            Just mvar -> do
+                                liftIO $ do
+                                    modifyMVar_ state_var $ \cur_st' ->
+                                        return cur_st'{mcp_pending_responses = IM.delete req_index (mcp_pending_responses cur_st')}
+                                    putMVar mvar result
+                                return MCPAccepted
             RequestMessage (JSONRPCRequest jsonrpc req_id method params) -> do
                 -- Validate JSON-RPC version
                 let bs_rpc_version = BSL.fromStrict (encodeUtf8 rPC_VERSION)
@@ -182,7 +224,7 @@ handleMCPRequestCore state_var mb_user request_value =
                                     Just handler_finalize -> do
                                         handler_st' <- handler_finalize handler_st
                                         return st{mcp_handler_state = handler_st'}
-                return final_result
+                return (MCPEventStream (sseEvent <$> fromStepT final_result))
   where
     handleProcessResult ::
         (Aeson.ToJSON a) =>
