@@ -22,8 +22,9 @@ This module provides two HTTP transports:
   requests reach the application.  Do __not__ expose it directly to the
   public internet.
 
-Both transports accept JSON-RPC requests via POST and return responses as
-SSE streams at the @\/mcp@ endpoint.
+Both transports accept JSON-RPC messages via POST at the @\/mcp@ endpoint.
+A request is answered with its JSON-RPC messages as an SSE stream; a
+notification or a response is answered with @202 Accepted@ and no body.
 -}
 module MCP.Server.HTTP (
     -- * JWT-authenticated API
@@ -35,6 +36,10 @@ module MCP.Server.HTTP (
     -- * Simple (unauthenticated) API
     SimpleHTTPAPI,
     simpleHttpApp,
+
+    -- * POST responses
+    MCPPostResponses,
+    MCPPostResult (..),
 ) where
 
 import Control.Concurrent.MVar
@@ -42,7 +47,9 @@ import Data.Aeson (encode, object, (.=))
 import Data.Text (Text)
 import MCP.Server.Common
 import MCP.Server.HTTP.Internal
+import MCP.Server.HTTP.AuthMultiVerb ()
 import Servant
+import Servant.API.MultiVerb (MultiVerb)
 import Servant.Auth.Server (Auth, AuthResult (..), JWT)
 import Servant.Auth.Server qualified as AuthServer
 import Servant.Types.SourceT
@@ -61,9 +68,10 @@ type MCPAPI =
         :> Auth '[JWT] MCPHandlerUser
         -- \^ JWT authentication using servant-auth
         :> ReqBody '[JSON] JSONRPCMessage
-        -- \^ JSON-RPC request
-        :> StreamPost JSONRPCFrame JSONRPCEvent (SourceIO JSONRPCMessage)
-        -- \^ Stream of JSON-RPC responses
+        -- \^ JSON-RPC message
+        :> MultiVerb 'POST '[JSON, JSONRPCEvent] MCPPostResponses MCPPostResult
+        -- \^ 202 for a notification or a response; a stream of JSON-RPC
+        -- messages for a request
         :<|> "mcp"
             :> Auth '[JWT] MCPHandlerUser
             :> StreamGet JSONRPCFrame JSONRPCEvent (SourceIO JSONRPCMessage)
@@ -94,7 +102,7 @@ handleMCPRequest ::
     MVar MCPServerState ->
     AuthResult MCPHandlerUser ->
     JSONRPCMessage ->
-    Handler (SourceIO JSONRPCMessage)
+    Handler MCPPostResult
 handleMCPRequest state_var auth_result request_value =
     case auth_result of
         AuthServer.NoSuchUser -> mcpAuthError "Invalid authentication credentials"
@@ -103,7 +111,7 @@ handleMCPRequest state_var auth_result request_value =
         AuthServer.Authenticated auth_user ->
             handleMCPRequestCore state_var (Just auth_user) request_value
   where
-    mcpAuthError :: Text -> Handler (SourceIO JSONRPCMessage)
+    mcpAuthError :: Text -> Handler MCPPostResult
     mcpAuthError err = throwError err401{errBody = encode $ object ["error" .= err]}
 
 -- ---------------------------------------------------------------------------
@@ -119,7 +127,7 @@ safe to use this transport.
 type SimpleHTTPAPI =
     "mcp"
         :> ReqBody '[JSON] JSONRPCMessage
-        :> StreamPost JSONRPCFrame JSONRPCEvent (SourceIO JSONRPCMessage)
+        :> MultiVerb 'POST '[JSON, JSONRPCEvent] MCPPostResponses MCPPostResult
         :<|> "mcp"
             :> StreamGet JSONRPCFrame JSONRPCEvent (SourceIO JSONRPCMessage)
 
@@ -138,7 +146,7 @@ simpleHttpApp state_var =
 handleSimpleHTTPEvents :: Handler (SourceIO JSONRPCMessage)
 handleSimpleHTTPEvents = return $ fromStepT Stop
 
-{- | Handle incoming MCP JSON-RPC requests (unauthenticated).
+{- | Handle incoming MCP JSON-RPC messages (unauthenticated).
 
 Delegates directly to 'handleMCPRequestCore'.  No user type is available,
 so @mcp_handler_init@ is not called.
@@ -146,5 +154,5 @@ so @mcp_handler_init@ is not called.
 handleSimpleHTTPRequest ::
     MVar MCPServerState ->
     JSONRPCMessage ->
-    Handler (SourceIO JSONRPCMessage)
+    Handler MCPPostResult
 handleSimpleHTTPRequest state_var = handleMCPRequestCore state_var Nothing

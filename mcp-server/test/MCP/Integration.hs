@@ -98,7 +98,7 @@ serverLifecycleSpec = describe "Server Lifecycle" $ do
             -- after successful initialization, the client sends notification to
             -- indicate readiness
             let notify_request = toJSON createInitializedNotification
-            mcpPostRequestOk headers notify_request
+            mcpPostNotificationAccepted headers notify_request
 
 -- | Test JWT authentication scenarios
 authenticationSpec :: SpecWith (AuthServer.JWTSettings, Application)
@@ -136,6 +136,18 @@ protocolFlowSpec = describe "Protocol Flow" $ do
                     toJSON $
                         createJSONRPCRequest (Just "1.0") (1 :: Int) "ping" Aeson.Null
             mcpPostRequestExpects headers invalid_request 400
+
+    it "answers an authenticated notification with 202 Accepted and no body" $
+        withAuthenticatedRequest $ \headers ->
+            mcpPostNotificationAccepted headers (toJSON createInitializedNotification)
+
+    it "answers an authenticated request with a stream of Server-Sent Events" $
+        withAuthenticatedRequest $ \headers ->
+            mcpPostRequestStreams headers (toJSON createPingRequest)
+
+    it "rejects an authenticated response to a request the server never sent" $
+        withAuthenticatedRequest $ \headers ->
+            mcpPostRequestExpects headers createUnexpectedResponse 400
 
     it "rejects authenticated request with wrong id" $ do
         withAuthenticatedRequest $ \headers -> do
